@@ -43,7 +43,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "ink": "^5.2.1",
+    "ink": "^8.0.0",
     "react": "^18.3.1"
   },
   "devDependencies": {
