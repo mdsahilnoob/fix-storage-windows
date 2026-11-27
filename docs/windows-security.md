@@ -10,7 +10,17 @@ Application code can call only `recycleWindows()` in `src/core/windows/trash.ts`
 
 `scripts/windows-recycle-bin.ps1` accepts UTF-8 JSON paths on stdin and compiles `scripts/RecycleBin.Native.cs` in memory. PowerShell runs with `-STA`; filenames never become script source. The C# bridge uses Windows `IFileOperation` directly, with no third-party trash package or Visual Basic FileIO dialog behavior.
 
-**Preflight before deletion:** the bridge resolves the path's actual volume mount with `GetVolumePathNameW`, rejects unknown, no-root, network, optical and RAM drives, requires `SHQueryRecycleBinW` to confirm a Recycle Bin for that volume, checks per-user and machine Recycle Bin policies for `NukeOnDelete`, and compares the Shell item's `SIGDN_FILESYSPATH` with the already confirmed path. If any check fails, no delete is queued and the item is untouched. This narrows, but does not make atomic, the validation-to-operation race.
+**Preflight before deletion:** `GetVolumePathNameW` is mandatory; failure stops immediately with no fallback to a containing drive letter. The resulting mount point is resolved with `GetVolumeNameForVolumeMountPointW` to a brace-delimited volume GUID, so folder-mounted volumes are checked against their own volume identity. Unknown, no-root, network, optical and RAM drives are rejected, `SHQueryRecycleBinW` must confirm a Recycle Bin for that mount, and policy state is verified. If any check fails, no delete is queued and the item is untouched. This narrows, but does not make atomic, the validation-to-operation race.
+
+**Policy checks are separate and fail closed:**
+
+1. Per-volume: `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{GUID}\NukeOnDelete`. The braces around the GUID are part of the key name and are preserved exactly from `GetVolumeNameForVolumeMountPointW`.
+2. Global policy: `NoRecycleFiles` under `HKCU` and `HKLM\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer`.
+3. Legacy global setting: `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\NukeOnDelete`.
+
+A missing key or value is the documented default (recycling enabled). An unreadable key, malformed value type, unexpected value, or failure to resolve the volume GUID is an **unverified state** and stops cleanup before any Shell operation.
+
+**File identity:** the bridge opens the target with `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`, rejects any `FILE_ATTRIBUTE_REPARSE_POINT`, and records the NTFS volume serial plus 64-bit file index. After resolving the Shell item, its `SIGDN_FILESYSPATH` must match the confirmed path and its file identity must match again. A mismatch cancels the operation. This is a best-effort narrowing of the time-of-check/time-of-use gap, not an atomic guarantee.
 
 The operation flags are:
 
@@ -34,6 +44,9 @@ Microsoft references:
 - [`PostDeleteItem` destination semantics](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifileoperationprogresssink-postdeleteitem)
 - [`IFileOperationProgressSink`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ifileoperationprogresssink)
 - [Windows SDK `FOFX_*` flag definitions](https://raw.githubusercontent.com/tpn/winsdk-10/master/Include/10.0.16299.0/um/ShObjIdl_core.h)
+- [`GetFileInformationByHandle` volume serial and file index](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileinformationbyhandle)
+- [`SHQueryRecycleBinW`](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shqueryrecyclebinw)
+- Observed Windows 10/11 per-volume `Volume\{GUID}\NukeOnDelete` key format and global `NoRecycleFiles` policy: <https://www.elevenforum.com/t/enable-or-disable-permanently-delete-instead-of-recycle-bin-in-windows-11.11007/>
 
 Runtime COM interop and Shell behavior remain unverified until the separately approved test phase.
 
@@ -44,7 +57,7 @@ Runtime COM interop and Shell behavior remain unverified until the separately ap
 3. **Plan:** category cleanup enumerates direct children only and excludes nested roots and aliases.
 4. **Policy:** `cannotRemoveWindows()` uses absolute, case-insensitive containment and protected-tree checks.
 5. **Provider:** `validateWindowsRecycle()` repeats policy checks, rejects final links and canonical/ancestor aliases, and reruns policy on the canonical target.
-6. **Traversal boundary:** a shared `windowsEntryKind()` guard runs before every top-level directory open in scanning, browsing, culprit discovery, cache planning and layout discovery; links are not entered.
+6. **Traversal boundary:** a shared `windowsEntryKind()` guard runs before every top-level directory open in scanning, browsing, culprit discovery, cache planning and layout discovery; Node-reported links/junctions are not entered. Node does not expose every Windows reparse tag, so non-symlink reparse directories encountered deep in a scan remain a documented limitation; every path selected for cleanup is checked by a native file handle for the reparse attribute before deletion.
 7. **Process boundary:** a fixed script and JSON stdin prevent filenames becoming PowerShell code.
 8. **Shell operation:** volume/bin preflight, exact Shell path identity, forced recycle, scoped volume types, and pre/post/finish recycle-only guards are mandatory; errors never invoke a fallback.
 9. **Positive accounting:** both the native provider and bulk cleaner require explicit moved-path evidence; absence from a failure list is not success.
@@ -62,6 +75,10 @@ Before a real or dry-run action, the Windows UI shows:
 - dry-run status when applicable.
 
 A matching second keypress within 15 seconds is required. Preparing a category plan does not arm until enumeration finishes. The prepared item list is passed to execution so the user confirms the same paths that are submitted. Paths are revalidated because files and permissions can change after review.
+
+## Accounting rule
+
+`freed` means bytes actually reclaimed and is derived only from a fresh `statfs`/disk-space measurement after cleanup. Logical bytes moved into the Recycle Bin are reported separately as `movedToRecycleBinBytes`; they are not added to `freed`. The count `removed` means successfully recycled items, not permanent removals. On Windows, cleanup normally reports reclaimed bytes of zero until the user empties the Recycle Bin through Windows.
 
 ## Dry-run and demo
 

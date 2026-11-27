@@ -75,8 +75,10 @@ export interface AppState {
     | null;
   /** Item being moved or deleted right now. */
   removing: string | null;
-  /** Estimated bytes cleared since the app started. */
+  /** Bytes actually reclaimed since the app started, from fresh disk measurements. */
   freed: number;
+  /** Estimated logical bytes moved to the Recycle Bin; no space reclaimed yet. */
+  movedToRecycleBinBytes: number;
   /** One line about the last action, shown until the next one. */
   note: string | null;
   /** When each listed item was last opened or changed, by path. */
@@ -124,6 +126,7 @@ export class Store {
     confirm: null,
     removing: null,
     freed: 0,
+    movedToRecycleBinBytes: 0,
     note: null,
     usage: {},
     culprits: {},
@@ -645,9 +648,9 @@ export class Store {
     let space = scan;
     let measured = scan.measured;
     let freed = this.state.freed;
+    let movedBytes = 0;
     if (forGood) {
       measured -= scan.sizes[category] - sizes[category];
-      freed += item.size;
     } else {
       // Still on disk, only in the Trash now.
       sizes.trash += item.size;
@@ -657,10 +660,13 @@ export class Store {
     if (this.options.demo && forGood) {
       const taken = Math.min(item.size, scan.used);
       space = { ...scan, used: scan.used - taken, available: scan.available + taken };
+      freed += taken;
     } else if (!this.pretend) {
       const after = await diskSpace(layout.drive);
       if (after.total > 0) space = { ...scan, ...after };
       sizes.system += unmeasuredBytes({ ...space, measured }) - unmeasuredBytes(scan);
+      if (forGood) freed += Math.max(0, scan.used - space.used);
+      else movedBytes = item.size;
     }
 
     const list = stack.length === 0 ? items[category] : drop(children);
@@ -673,6 +679,7 @@ export class Store {
       row: Math.min(this.state.row, Math.max(0, Math.min(list.length, MAX_ROWS) - 1)),
       removing: null,
       freed,
+      movedToRecycleBinBytes: this.state.movedToRecycleBinBytes + movedBytes,
       note: `${prefix} ${basename(item.path)} (${size(item.size)}).${forGood || this.pretend ? "" : IS_WINDOWS ? " Space remains in use until you choose to empty the Recycle Bin in Windows." : " Empty the Trash to get the space back."}`,
     });
   }
@@ -754,9 +761,9 @@ export class Store {
 
     const items = prepared ?? (this.options.demo ? demoPlan(id, layout) : await plan(id, this.state.scan.items[id], layout));
 
-    const onProgress = ({ path, freed }: { path: string; freed: number }) => {
+    const onProgress = ({ path, freed, movedToRecycleBinBytes = 0 }: { path: string; freed: number; movedToRecycleBinBytes?: number }) => {
       const scan = this.state.scan;
-      const taken = Math.min(freed, scan.sizes[id]);
+      const taken = Math.min(freed + movedToRecycleBinBytes, scan.sizes[id]);
       const simulated = this.options.demo && !IS_WINDOWS ? Math.min(taken, scan.used) : 0;
       const sizes = { ...scan.sizes, [id]: scan.sizes[id] - taken };
       if (IS_WINDOWS && !dryRun) sizes.trash += taken;
@@ -774,30 +781,37 @@ export class Store {
 
     let skipped = 0;
     let cleanupError = "";
+    let movedEstimate = 0;
     const skippedPaths = new Set<string>();
     if (this.options.demo) {
       for (const item of items) {
         await new Promise((done) => setTimeout(done, 70));
-        onProgress({ path: item.path, freed: item.size });
+        if (IS_WINDOWS) movedEstimate += item.size;
+        onProgress({ path: item.path, freed: IS_WINDOWS ? 0 : item.size, movedToRecycleBinBytes: IS_WINDOWS ? item.size : 0 });
       }
     } else {
       const result = await clean(id, items, layout, { dryRun: this.options.dryRun, onProgress });
       skipped = result.skipped.length;
+      movedEstimate = result.movedToRecycleBinBytes;
       for (const path of result.skipped) skippedPaths.add(IS_WINDOWS ? normalPath(path) : path);
       const first = result.errors?.[0];
       if (first) cleanupError = `${first.path}: ${first.error}`;
     }
 
-    // Replace the running estimate with what is actually on disk now.
+    // Replace the running estimate with what is actually on disk now. Actual
+    // reclamation is derived from the fresh filesystem measurement only.
     let scan = this.state.scan;
+    let space = original;
     if (!this.pretend) {
-      const [left, space] = await Promise.all([measure(id, layout), diskSpace(layout.drive)]);
+      const [left, fresh] = await Promise.all([measure(id, layout), diskSpace(layout.drive)]);
       const sizes = { ...scan.sizes, [id]: left };
       const measured = scan.measured + (left - scan.sizes[id]);
-      scan = { ...scan, ...(space.total > 0 ? space : {}), sizes, measured };
+      space = fresh.total > 0 ? fresh : space;
+      scan = { ...scan, ...space, sizes, measured };
       sizes.system += unmeasuredBytes(scan) - unmeasuredBytes(original);
     }
-    const freed = Math.max(0, before - scan.sizes[id]);
+    const estimateChange = Math.max(0, before - scan.sizes[id]);
+    const actualFreed = !this.pretend && space.total > 0 ? Math.max(0, original.used - space.used) : 0;
     const remainingItems = IS_WINDOWS ? items.filter((item) => skippedPaths.has(normalPath(item.path))) : [];
     scan = { ...scan, items: { ...scan.items, [id]: remainingItems } };
 
@@ -808,7 +822,10 @@ export class Store {
         : IS_WINDOWS
           ? "moved to the Windows Recycle Bin (estimated)"
           : "cleared (estimated)";
-    const parts = [`${CATEGORY[id].name}: ${size(freed)} ${outcome}.`];
+    const parts = IS_WINDOWS
+      ? [`${CATEGORY[id].name}: ${size(movedEstimate)} ${outcome}.`]
+      : [`${CATEGORY[id].name}: ${size(estimateChange)} ${outcome}.`];
+    if (!this.pretend && actualFreed > 0) parts.push(`${size(actualFreed)} actually reclaimed from a fresh disk measurement.`);
     if (IS_WINDOWS && !dryRun && !this.options.demo) parts.push("No disk space is reclaimed until you choose to empty the Recycle Bin in Windows.");
     if (skipped > 0) parts.push(
       IS_WINDOWS
@@ -816,11 +833,17 @@ export class Store {
         : `${skipped} ${skipped === 1 ? "item was" : "items were"} in use or protected and left alone.`,
     );
     if (cleanupError) parts.push(`First error: ${cleanupError}`);
+    const sessionFreed = dryRun
+      ? this.state.freed
+      : this.options.demo
+        ? this.state.freed + (IS_WINDOWS ? 0 : estimateChange)
+        : this.state.freed + actualFreed;
     this.set({
       scan: dryRun ? original : scan,
       action: null,
       pane: "sidebar",
-      freed: this.state.freed + (dryRun || IS_WINDOWS ? 0 : freed),
+      freed: sessionFreed,
+      movedToRecycleBinBytes: this.state.movedToRecycleBinBytes + (!dryRun && !this.options.demo ? movedEstimate : 0),
       note: parts.join(" "),
     });
   }

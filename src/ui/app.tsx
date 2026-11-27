@@ -7,7 +7,7 @@ import { deletesForGood, type Culprit } from "../core/browse";
 import { classify, shortAge, type Verdict } from "../core/classify";
 import type { Clearable } from "../core/clean";
 import { capacity, gb, size, tilde } from "../core/format";
-import { IS_MAC, IS_WINDOWS, REVEAL_LABEL } from "../core/platform";
+import { IS_MAC, IS_WINDOWS, REVEAL_LABEL, TRASH_NAME } from "../core/platform";
 import type { Item } from "../core/scan";
 import { BAR_ROWS, BarCanvas, HEADROOM_ROWS, diskSegments, type BarModel } from "./bar";
 import { MAX_ROWS, type AppState, type Store } from "./store";
@@ -304,8 +304,8 @@ function Totals({ state, fs }: Ctx) {
         <T fs={fs}>{known ? pct(scan.used, scan.total) : "…"}</T>
         <T fs={fs} color={MUTED}>{" full"}</T>
       </Box>
-      {state.freed > 0 ? (
-        <T fs={fs} color={GREEN}>{`~${gb(state.freed)} cleared this session`}</T>
+      {IS_WINDOWS || state.freed > 0 ? (
+        <T fs={fs} color={GREEN}>{IS_WINDOWS ? `~${gb(state.freed)} reclaimed · ~${gb(state.movedToRecycleBinBytes)} in ${TRASH_NAME}` : `~${gb(state.freed)} cleared this session`}</T>
       ) : !IS_MAC && state.drives[state.drive] ? (
         <T fs={fs} color={FAINT} style={{ flexShrink: 1, ellipsis: true, margin: { left: ch(fs, 2) } }}>
           {driveDetail(state)}

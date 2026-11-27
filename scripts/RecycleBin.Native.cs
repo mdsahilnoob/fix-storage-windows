@@ -152,6 +152,36 @@ namespace FixStorage
         public long i64NumItems;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FileTime
+    {
+        public uint Low;
+        public uint High;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public FileTime CreationTime;
+        public FileTime LastAccessTime;
+        public FileTime LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    /** Verified state; Unverified must fail closed. */
+    public enum PolicyState
+    {
+        Enabled,
+        Disabled,
+        Unverified
+    }
+
     public static class NativeRecycle
     {
         private const uint RecycleOnDelete = 0x00080000;
@@ -171,6 +201,12 @@ namespace FixStorage
         private const uint DriveRamdisk = 6;
         private const uint KeyRead = 0x20019;
         private const int ErrorFileNotFound = 2;
+        private const uint FileAttributeReparsePoint = 0x00000400;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileShareAll = 0x00000007;
+        private const uint OpenExisting = 3;
+        private static readonly IntPtr InvalidHandle = new IntPtr(-1);
         private static readonly Guid ShellItemGuid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
         private static readonly IntPtr HKeyCurrentUser = new IntPtr(unchecked((int)0x80000001));
         private static readonly IntPtr HKeyLocalMachine = new IntPtr(unchecked((int)0x80000002));
@@ -204,6 +240,24 @@ namespace FixStorage
             StringBuilder volumeName,
             uint bufferLength);
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(
+            [MarshalAs(UnmanagedType.LPWStr)] string path,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandle(IntPtr handle, out ByHandleFileInformation info);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+
         [DllImport("ole32.dll")]
         private static extern int CoInitializeEx(IntPtr reserved, uint apartment);
         [DllImport("ole32.dll")]
@@ -229,38 +283,37 @@ namespace FixStorage
             return String.Equals(left.TrimEnd('\\'), right.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool RecycleDisabledByPolicy(string root)
+        /** The registry key uses the full brace-delimited GUID, e.g. {1f5e...}. */
+        private static string RequireVolumeGuid(string mount)
         {
             StringBuilder volumeName = new StringBuilder(1024);
-            if (!GetVolumeNameForVolumeMountPointW(root, volumeName, (uint)volumeName.Capacity)) return false;
-
-            string guid = volumeName.ToString().Replace("\\\\?\\", "").Replace("\\", "").Replace("{", "").Replace("}", "");
-            const string volumePrefix = "Volume";
-            if (guid.StartsWith(volumePrefix, StringComparison.OrdinalIgnoreCase)) guid = guid.Substring(volumePrefix.Length);
-            if (guid.Length == 0) return false;
-            string subKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\BitBucket\\Volume\\" + guid;
-            uint disabled;
-            if (TryReadDword(HKeyCurrentUser, subKey, "NukeOnDelete", out disabled) && disabled == 1) return true;
-            string globalSubKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\BitBucket";
-            if (TryReadDword(HKeyCurrentUser, globalSubKey, "NukeOnDelete", out disabled) && disabled == 1) return true;
-            return TryReadDword(HKeyLocalMachine, globalSubKey, "NukeOnDelete", out disabled) && disabled == 1;
+            if (!GetVolumeNameForVolumeMountPointW(mount, volumeName, (uint)volumeName.Capacity))
+                throw new InvalidOperationException("Could not resolve this mount point to a volume GUID; no delete was scheduled.");
+            string text = volumeName.ToString();
+            int open = text.IndexOf('{');
+            int close = text.IndexOf('}');
+            if (open < 0 || close <= open || close != text.LastIndexOf('}'))
+                throw new InvalidOperationException("Windows returned an unrecognized volume GUID format; no delete was scheduled.");
+            return text.Substring(open, close - open + 1);
         }
 
-        private static bool TryReadDword(IntPtr key, string subKey, string valueName, out uint value)
+        private static PolicyState ReadPolicyValue(IntPtr hive, string subKey, string valueName)
         {
-            value = 0;
             IntPtr opened = IntPtr.Zero;
-            int result = RegOpenKeyExW(key, subKey, 0, KeyRead, out opened);
-            if (result == ErrorFileNotFound) return false;
-            if (result != 0) throw new COMException("Could not read Recycle Bin settings.", result);
+            int result = RegOpenKeyExW(hive, subKey, 0, KeyRead, out opened);
+            if (result == ErrorFileNotFound) return PolicyState.Enabled;
+            if (result != 0) return PolicyState.Unverified;
             try
             {
                 uint type;
                 uint size = 4;
+                uint value = 0;
                 result = RegQueryValueExW(opened, valueName, IntPtr.Zero, out type, out value, ref size);
-                if (result == ErrorFileNotFound) return false;
-                if (result != 0) throw new COMException("Could not read Recycle Bin settings.", result);
-                return type == 4 && size == 4;
+                if (result == ErrorFileNotFound) return PolicyState.Enabled;
+                if (result != 0 || type != 4 || size != 4) return PolicyState.Unverified;
+                if (value == 0) return PolicyState.Enabled;
+                if (value == 1) return PolicyState.Disabled;
+                return PolicyState.Unverified;
             }
             finally
             {
@@ -268,14 +321,60 @@ namespace FixStorage
             }
         }
 
+        private static PolicyState ReadPerVolumePolicy(string volumeGuid)
+        {
+            string subKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\BitBucket\\Volume\\" + volumeGuid;
+            return ReadPolicyValue(HKeyCurrentUser, subKey, "NukeOnDelete");
+        }
+
+        private static PolicyState ReadGlobalPolicy()
+        {
+            string subKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
+            PolicyState user = ReadPolicyValue(HKeyCurrentUser, subKey, "NoRecycleFiles");
+            PolicyState machine = ReadPolicyValue(HKeyLocalMachine, subKey, "NoRecycleFiles");
+            if (user == PolicyState.Unverified || machine == PolicyState.Unverified) return PolicyState.Unverified;
+            if (user == PolicyState.Disabled || machine == PolicyState.Disabled) return PolicyState.Disabled;
+            return PolicyState.Enabled;
+        }
+
+        private static PolicyState ReadLegacyGlobalBitBucketPolicy()
+        {
+            string subKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\BitBucket";
+            return ReadPolicyValue(HKeyCurrentUser, subKey, "NukeOnDelete");
+        }
+
+        private static void RequireRecycleEnabled(string volumeGuid)
+        {
+            PolicyState perVolume = ReadPerVolumePolicy(volumeGuid);
+            if (perVolume == PolicyState.Unverified)
+                throw new InvalidOperationException("Per-volume Recycle Bin policy could not be verified; no delete was scheduled.");
+            if (perVolume == PolicyState.Disabled)
+                throw new InvalidOperationException("Windows is configured to bypass the Recycle Bin on this volume; no delete was scheduled.");
+
+            PolicyState global = ReadGlobalPolicy();
+            if (global == PolicyState.Unverified)
+                throw new InvalidOperationException("Global Recycle Bin policy could not be verified; no delete was scheduled.");
+            if (global == PolicyState.Disabled)
+                throw new InvalidOperationException("Windows policy disables the Recycle Bin; no delete was scheduled.");
+
+            PolicyState legacy = ReadLegacyGlobalBitBucketPolicy();
+            if (legacy == PolicyState.Unverified)
+                throw new InvalidOperationException("Legacy BitBucket settings could not be verified; no delete was scheduled.");
+            if (legacy == PolicyState.Disabled)
+                throw new InvalidOperationException("Legacy settings disable the Recycle Bin; no delete was scheduled.");
+        }
+
         private static void Preflight(string fullPath)
         {
             StringBuilder mountBuilder = new StringBuilder(1024);
-            string root = Path.GetPathRoot(fullPath);
-            if (GetVolumePathNameW(fullPath, mountBuilder, (uint)mountBuilder.Capacity)) root = mountBuilder.ToString();
-            if (String.IsNullOrEmpty(root)) throw new InvalidOperationException("Could not determine the volume for this path; no delete was scheduled.");
+            if (!GetVolumePathNameW(fullPath, mountBuilder, (uint)mountBuilder.Capacity))
+                throw new InvalidOperationException("Could not resolve the volume mount point for this path; no delete was scheduled.");
+            string mount = mountBuilder.ToString();
+            if (String.IsNullOrEmpty(mount))
+                throw new InvalidOperationException("Windows returned an empty volume mount point; no delete was scheduled.");
 
-            uint driveType = GetDriveTypeW(root);
+            string volumeGuid = RequireVolumeGuid(mount);
+            uint driveType = GetDriveTypeW(mount);
             if (driveType == DriveUnknown || driveType == DriveNoRoot || driveType == DriveRemote || driveType == DriveCdrom || driveType == DriveRamdisk)
                 throw new InvalidOperationException("This volume type has no verified Windows Recycle Bin; no delete was scheduled.");
             if (driveType != DriveFixed && driveType != DriveRemovable)
@@ -283,12 +382,39 @@ namespace FixStorage
 
             SHQUERYRBINFO info = new SHQUERYRBINFO();
             info.cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO));
-            Check(SHQueryRecycleBinW(root, ref info), "Checking Recycle Bin availability");
-            if (RecycleDisabledByPolicy(root))
-                throw new InvalidOperationException("Windows is configured to bypass the Recycle Bin on this volume; no delete was scheduled.");
+            Check(SHQueryRecycleBinW(mount, ref info), "Checking Recycle Bin availability");
+            RequireRecycleEnabled(volumeGuid);
         }
 
-        private static string VerifiedShellPath(string fullPath, object shellItem)
+        /** Opens without following links and rejects every reparse-point attribute. */
+        private static string ReadFileIdentity(string path)
+        {
+            IntPtr handle = CreateFileW(
+                path,
+                0,
+                FileShareAll,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle == InvalidHandle)
+                throw new InvalidOperationException("Windows could not open this item for identity verification; no delete was scheduled.");
+            try
+            {
+                ByHandleFileInformation info;
+                if (!GetFileInformationByHandle(handle, out info))
+                    throw new InvalidOperationException("Windows could not read this item's file identity; no delete was scheduled.");
+                if ((info.FileAttributes & FileAttributeReparsePoint) != 0)
+                    throw new InvalidOperationException("This item is a reparse point and is not a cleanup candidate; no delete was scheduled.");
+                return String.Format("{0:X8}:{1:X8}{2:X8}", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow);
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+
+        private static string VerifiedShellPath(string fullPath, object shellItem, string expectedIdentity)
         {
             IShellItem item = shellItem as IShellItem;
             if (item == null) throw new InvalidOperationException("Windows did not return a filesystem Shell item; no delete was scheduled.");
@@ -299,6 +425,8 @@ namespace FixStorage
                 string actual = Marshal.PtrToStringUni(pointer);
                 if (!SamePath(actual, fullPath))
                     throw new InvalidOperationException("The Shell item path no longer matches the confirmed path; no delete was scheduled.");
+                if (!String.Equals(ReadFileIdentity(actual), expectedIdentity, StringComparison.Ordinal))
+                    throw new InvalidOperationException("The Shell item no longer matches the verified file identity; no delete was scheduled.");
                 return actual;
             }
             finally
@@ -333,10 +461,11 @@ namespace FixStorage
             {
                 string fullPath = Path.GetFullPath(path);
                 Preflight(fullPath);
+                string identity = ReadFileIdentity(fullPath);
 
                 Guid interfaceId = ShellItemGuid;
                 Check(SHCreateItemFromParsingName(fullPath, IntPtr.Zero, ref interfaceId, out item), "Creating the Shell item");
-                VerifiedShellPath(fullPath, item);
+                VerifiedShellPath(fullPath, item, identity);
 
                 operation = (IFileOperation)new FileOperationComObject();
                 uint flags = RecycleOnDelete | EarlyFailure | AddUndoRecord | NoErrorUi | NoConfirmation | Silent;

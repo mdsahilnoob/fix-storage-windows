@@ -45,6 +45,17 @@ This document tracks implementation status. It is a static development record, n
 
 None of these repairs has been built or executed.
 
+## Focused P1/P2 repair pass
+
+- [x] `GetVolumePathNameW` is mandatory with no drive-letter fallback; volume GUID resolution is mandatory.
+- [x] Per-volume `Volume\{GUID}\NukeOnDelete` uses the brace-delimited GUID; global `NoRecycleFiles` and legacy BitBucket policy checks are separate and fail closed on unverified state.
+- [x] Windows file-handle identity checks record volume serial/file index, reject reparse attributes and recheck the Shell item before deletion.
+- [x] `movedToRecycleBinBytes` is separate from `freed`; reclamation comes from fresh disk measurement and is shown in UI, CLI output and reports.
+- [x] Native stdout is byte-counted and strict result-shape validation rejects malformed or incomplete output.
+- [x] Documentation records that Node `lstat` cannot identify every reparse tag and that native predelete checks cover selected cleanup paths.
+
+None of these repairs has been built or executed.
+
 ## Outstanding validation
 
 All Windows functionality remains untested until a separately requested test phase. See `WINDOWS.md` for the validation matrix and known limitations.

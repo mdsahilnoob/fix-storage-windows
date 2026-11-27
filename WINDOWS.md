@@ -79,11 +79,13 @@ Cancellation stops scheduling further work. A large directory can still require 
 2. The app prepares the direct-child cache plan. The Recycle Bin itself is never a bulk-clear target.
 3. Review every exact selected path, the item count, and estimated bytes.
 4. Confirm again within 15 seconds. Navigation or timeout cancels the armed selection.
-5. Before any delete is queued, the native bridge resolves the path's actual volume mount, rejects unknown/network/optical/RAM drives, requires a working Recycle Bin there through `SHQueryRecycleBin`, checks that the volume is not configured with `NukeOnDelete`, and verifies that the Shell item still resolves to the exact confirmed path.
+5. Before any delete is queued, `GetVolumePathNameW` must resolve the actual mount point (no drive-letter fallback), `GetVolumeNameForVolumeMountPointW` must yield the brace-delimited volume GUID, unsupported volume types are rejected, `SHQueryRecycleBin` must confirm a bin, per-volume `NukeOnDelete`, global `NoRecycleFiles`, and legacy BitBucket settings must be verified or absent by default, and both the Shell path and NTFS volume-serial/file-index identity must match the confirmed target. A reparse-point attribute from the native file handle stops cleanup.
 6. `IFileOperation` uses `FOFX_RECYCLEONDELETE` and `FOFX_ADDUNDORECORD`. `PreDeleteItem` requires `TSF_DELETE_RECYCLE_IF_POSSIBLE`; `PostDeleteItem` requires one successful callback with recycle flags and a non-null Recycle Bin item; `FinishOperations` must also succeed with no aborted operations.
 7. Successful and unsuccessful paths are recorded. `PostDeleteItem` is confirmation, not rollback: if it fails, the source may already have been permanently deleted, and the user is told to inspect manually. Source disappearance alone never counts as success. No result is retried with another mechanism.
 
 Moving an item to the Recycle Bin does **not** reclaim its space. Windows still accounts for it until the user independently empties or restores items through Windows. This app has no empty-Recycle-Bin operation.
+
+Accounting is reported in two separate fields: `movedToRecycleBinBytes` is the estimated logical size of items moved, while `freed` is derived only from a fresh filesystem measurement after cleanup and is normally zero until Windows empties the bin. The UI shows both session values; `removed` counts successfully recycled items rather than permanent deletions.
 
 `--dry-run` scans real storage but never invokes recycling. `--demo` uses synthetic paths and data and does not scan real storage. Read-only reports never clean anything.
 
@@ -138,3 +140,42 @@ A separately requested test phase should cover, at minimum:
 11. Windows Terminal, PowerShell 5.1/7, Windows Console, keyboard navigation, resizing, Unicode, and non-English locales.
 
 None of these checks has been performed in this development phase.
+
+### Commands for the later approved validation phase
+
+Do not run these during development. Use a disposable Windows 10/11 x64 environment and paths created only for validation.
+
+```powershell
+Set-Location C:\coding\gg_project\terminal-clean\fix-storage-windows
+
+# Static/build and read-only CLI checks.
+npm ci
+npm run typecheck
+npm run build
+node bin/fix-storage.cjs --help
+node bin/fix-storage.cjs --demo --plain
+node bin/fix-storage.cjs --demo --json
+node bin/fix-storage.cjs --drives --json
+
+# Compile-check the native bridge without processing user paths.
+$source = Join-Path $PWD 'scripts\RecycleBin.Native.cs'
+powershell.exe -NoLogo -NoProfile -NonInteractive -STA -Command "Add-Type -LiteralPath '$source'"
+
+# Synthetic Recycle Bin fixture. Create it only in an approved test environment.
+$fixtureRoot = Join-Path $env:TEMP 'fix-storage-validation'
+New-Item -ItemType Directory -Force -Path $fixtureRoot | Out-Null
+Set-Content -LiteralPath (Join-Path $fixtureRoot 'sample.txt') -Value 'synthetic fixture'
+
+# Preflight/dry-run in the app, then use the interactive UI with d/d or c/c.
+npm start -- --dry-run
+
+# Direct native-helper check on the synthetic fixture only, after app review.
+@((Join-Path $fixtureRoot 'sample.txt')) |
+  ConvertTo-Json -Compress |
+  powershell.exe -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\windows-recycle-bin.ps1')
+
+# Confirm the path is gone, then restore it manually from the Windows Recycle Bin.
+Test-Path -LiteralPath (Join-Path $fixtureRoot 'sample.txt')
+```
+
+Do not use the direct native-helper command on real files, and do not empty the Recycle Bin as part of validation.

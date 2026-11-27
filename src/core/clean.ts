@@ -15,8 +15,10 @@ export type Clearable = Extract<CategoryId, "caches" | "trash">;
 export interface CleanProgress {
   /** Path that was just handled. */
   path: string;
-  /** Bytes it freed; 0 when it could not be removed. */
+  /** Bytes actually reclaimed; always 0 for Recycle Bin moves. */
   freed: number;
+  /** Estimated logical bytes moved into the Windows Recycle Bin. */
+  movedToRecycleBinBytes?: number;
 }
 
 export interface CleanOptions {
@@ -26,7 +28,11 @@ export interface CleanOptions {
 }
 
 export interface CleanResult {
+  /** Bytes actually reclaimed, from a fresh filesystem measurement. */
   freed: number;
+  /** Estimated logical bytes placed in the Windows Recycle Bin; no space reclaimed yet. */
+  movedToRecycleBinBytes: number;
+  /** Count of successfully recycled items; not permanent removals. */
   removed: number;
   /** Paths that could not be removed (in use, or protected by the system). */
   skipped: string[];
@@ -90,7 +96,7 @@ function inside(category: Clearable, path: string, layout: Layout): boolean {
 
 export async function clean(category: Clearable, items: Item[], layout: Layout, options: CleanOptions = {}): Promise<CleanResult> {
   if (IS_WINDOWS && !options.dryRun) return cleanWindows(category, items, layout, options);
-  const result: CleanResult = { freed: 0, removed: 0, skipped: [] };
+  const result: CleanResult = { freed: 0, movedToRecycleBinBytes: 0, removed: 0, skipped: [] };
 
   for (const item of items) {
     let freed = 0;
@@ -98,7 +104,8 @@ export async function clean(category: Clearable, items: Item[], layout: Layout, 
       result.skipped.push(item.path);
     } else if (options.dryRun) {
       await sleep(25 + Math.min(120, item.size / 2e7));
-      freed = item.size;
+      if (IS_WINDOWS) result.movedToRecycleBinBytes += item.size;
+      else freed = item.size;
     } else {
       try {
         await fsp.rm(item.path, { recursive: true, force: true });
@@ -114,21 +121,25 @@ export async function clean(category: Clearable, items: Item[], layout: Layout, 
       result.freed += freed;
       result.removed += 1;
     }
-    options.onProgress?.({ path: item.path, freed });
+    options.onProgress?.({
+      path: item.path,
+      freed,
+      movedToRecycleBinBytes: IS_WINDOWS && options.dryRun ? item.size : 0,
+    });
   }
   return result;
 }
 
 /** Windows bulk cleanup has one Recycle Bin provider and no permanent-delete branch. */
 async function cleanWindows(category: Clearable, items: Item[], layout: Layout, options: CleanOptions): Promise<CleanResult> {
-  const result: CleanResult = { freed: 0, removed: 0, skipped: [], errors: [] };
+  const result: CleanResult = { freed: 0, movedToRecycleBinBytes: 0, removed: 0, skipped: [], errors: [] };
   const allowed: Item[] = [];
   for (const item of items) {
     const reason = layout.lookOnly || !inside(category, item.path, layout) || layout.foreign(item.path) ? "Outside the permitted cleanup roots." : cannotRemove(item.path, layout);
     if (reason) {
       result.skipped.push(item.path);
       result.errors?.push({ path: item.path, error: reason });
-      options.onProgress?.({ path: item.path, freed: 0 });
+      options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
     } else allowed.push(item);
   }
   if (allowed.length === 0) return result;
@@ -140,7 +151,7 @@ async function cleanWindows(category: Clearable, items: Item[], layout: Layout, 
     for (const item of allowed) {
       result.skipped.push(item.path);
       result.errors?.push({ path: item.path, error: message });
-      options.onProgress?.({ path: item.path, freed: 0 });
+      options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
     }
     return result;
   }
@@ -154,11 +165,11 @@ async function cleanWindows(category: Clearable, items: Item[], layout: Layout, 
     if (error) {
       result.skipped.push(item.path);
       result.errors?.push({ path: item.path, error });
-      options.onProgress?.({ path: item.path, freed: 0 });
+      options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
     } else {
-      result.freed += item.size;
+      result.movedToRecycleBinBytes += item.size;
       result.removed++;
-      options.onProgress?.({ path: item.path, freed: item.size });
+      options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: item.size });
     }
   }
   return result;

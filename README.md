@@ -11,6 +11,7 @@ A native Windows port of [fix-storage](https://github.com/govijr/fix-storage), f
 - The app never empties the Recycle Bin.
 - Cleanup requires a second keypress after showing the exact paths, item count, estimated size, and destination.
 - `--dry-run` and `--demo` do not change filesystem contents.
+- Moved bytes and actually reclaimed bytes are reported separately; Recycle Bin moves do not count as reclaimed space.
 - Windows, installed-program locations, boot/recovery data, profile roots, volume roots, and Recycle Bin contents are protected.
 - Junctions and symbolic links are not traversed or accepted for cleanup.
 

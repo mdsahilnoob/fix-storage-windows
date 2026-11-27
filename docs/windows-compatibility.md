@@ -26,6 +26,7 @@ Reused in the port:
 | Unix `du` and `ps` | Asynchronous Node walker and depth-limited culprit walk |
 | POSIX case-sensitive `/` paths | Case-insensitive normalized Windows containment and separator-aware ancestry |
 | `stat.blocks * 512` | Logical `stat.size` on Windows (allocated-size limitation documented) |
+| Recycled cache bytes counted as freed | Separate `movedToRecycleBinBytes`; `freed` only from fresh disk measurement |
 | Spotlight or Linux atime | Modification time only, never labelled last-opened |
 | Finder/D-Bus/xdg-open | Explorer open/select process arguments without a shell |
 | macOS/freedesktop Trash | Native C# `IFileOperation` bridge with pre-delete and post-delete recycle-only guards |

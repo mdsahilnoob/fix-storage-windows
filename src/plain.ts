@@ -120,6 +120,9 @@ export function toJson(scan: ScanSnapshot, layout: Layout): string {
           largest: scan.items[c.id].slice(0, 5),
         })),
         blocked: scan.blocked,
+        ...(IS_WINDOWS
+          ? { cleanup: { destination: "windows-recycle-bin", movedBytesAreNotFreed: true, freedRequiresRecycleBinEmpty: true } }
+          : {}),
       },
       null,
       2,
@@ -167,6 +170,7 @@ export function toText(scan: ScanSnapshot, layout: Layout, driveCount: number): 
     for (const path of scan.blocked.slice(0, 8)) lines.push(`  ${tilde(path)}`);
     if (scan.blocked.length > 8) lines.push(`  and ${scan.blocked.length - 8} more`);
   }
+  if (IS_WINDOWS) lines.push("", "Cleanup moves items to the Windows Recycle Bin; moved bytes are not reclaimed until you empty it in Windows.");
   if (!IS_MAC && driveCount > 1) lines.push("", `${driveCount} drives mounted · fix-storage --drives lists them`);
   return lines.join("\n") + "\n";
 }
