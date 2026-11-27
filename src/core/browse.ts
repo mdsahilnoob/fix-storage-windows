@@ -411,7 +411,7 @@ export function reviewRestriction(path: string, layout: Layout): string | null {
   } else {
     if (LINUX_MANAGED.some((dir) => target.startsWith(dir + "/"))) return "Linux or a package manager manages this.";
     const flatpak = join(dirname(homeTrash(layout.home)), "flatpak");
-    if (target.startsWith(flatpak + "/")) return "Flatpak manages this · use flatpak uninstall.";
+    if (target.startsWith(flatpak + "/")) return "Flatpak manages this · review with Flatpak tools.";
     if (layout.foreign(target)) return "Another drive is mounted here.";
   }
   const known = layout.roots.some((root) => target.startsWith(resolve(root.path) + sep));

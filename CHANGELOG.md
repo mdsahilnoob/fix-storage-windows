@@ -2,25 +2,36 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## v1 — read-only product scope (pending validation)
 
-### Added — native Windows port (implemented, not yet tested)
+**v1 is a read-only storage analysis and cleanup recommendation application. Automated cleanup is no longer supported on any platform. No hidden cleanup mode or activation flag exists.**
+
+### Added
 
 - Windows 10/11 x64 platform detection, PowerShell/CIM volume discovery, drive letters, folder mount points, volume GUIDs, removable drives, capacity reporting and multi-drive selection.
-- Asynchronous Windows recursive scanning with bounded I/O, cancellation, long-path/Unicode handling, permission reporting, reparse-point avoidance, large-item browsing and culprit discovery.
-- Windows storage layouts for temporary files, AppData, application caches, developer tools/caches/stores, game storage, personal folders, secondary drives, system data and Recycle Bin accounting.
+- Asynchronous recursive scanning with bounded I/O, cancellation, long-path/Unicode handling, permission reporting and reparse-point avoidance.
+- Windows storage layouts for temporary files, AppData, application caches, developer tools/caches/stores, game storage, personal folders, secondary drives, system data and existing Recycle Bin usage reporting.
 - Windows-aware classification and modification-time metadata that is never presented as reliable last-opened evidence.
+- Informational cleanup recommendations with exact paths, reasons and estimated opportunity sizes.
+- Possible duplicate-file candidates grouped by name and byte size; contents are never read or hashed.
 - Native Explorer open/reveal integration without shell-interpolated filenames.
-- Windows Recycle Bin-only cleanup for both files and directories, with exact-path confirmation, item counts, estimated sizes, per-item results and no permanent-delete fallback.
-- Interactive Ink/React terminal UI preserving the original Store workflows, plus `--plain`, `--json`, `--drives`, `--drive`, `--demo` and `--dry-run` compatibility.
-- Windows installation, architecture, security, storage-category, compatibility, troubleshooting and outstanding-testing documentation.
+- Interactive Ink/React terminal UI with drive selection, category browsing, culprit discovery, filtering, recommendations and refresh.
+- `--plain`, `--json`, `--drives`, `--drive`, `--demo` and `--help` analysis modes.
+
+### Removed
+
+- All automated file and directory cleanup, deletion and recycling.
+- Permanent cache/Trash deletion and Recycle Bin-only cleanup workflows.
+- Two-step cleanup confirmation and cleanup progress indicators.
+- `--dry-run` and all cleanup-implying CLI options, which are now rejected before application modules load.
+- Reclaimed-byte and successful-cleanup accounting.
 
 ### Changed
 
-- Windows cache cleanup moves items to the Recycle Bin instead of permanently deleting them; recycled bytes are not reported as reclaimed space.
-- Recycle Bin emptying is unavailable and Recycle Bin contents are protected from app cleanup.
-- The Windows UI uses Ink because Pixel 0.3.1 has no Windows runtime. Pixel graphics, mouse actions and Home/End shortcuts are not reproduced.
-- npm scripts and package metadata support PowerShell/Windows; Pixel-specific reference entry files are excluded from Windows builds so its unsupported postinstall is not needed.
+- Category sizes, potential savings and duplicate candidates are explicitly estimates.
+- Reports use read-only terminology and identify `mode: read-only-analysis-and-recommendations`.
+- The archived native Recycle Bin bridge is excluded from runtime paths and the published package.
+- The Windows UI uses Ink because Pixel 0.3.1 has no Windows runtime.
 
 ### Original project history
 

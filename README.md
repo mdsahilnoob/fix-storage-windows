@@ -77,7 +77,7 @@ No key triggers filesystem modification.
 
 ## Reports and accounting
 
-Category values are estimates based on logical file sizes, not allocated-cluster totals. Independent category estimates can exceed filesystem usage; unmeasured and unreadable space is assigned to System data.
+Category values are estimates based on logical file sizes, not allocated-cluster totals. Independent category estimates can overlap and exceed filesystem usage, so they must not be added together as unique storage. Unmeasured and unreadable space is assigned to System data.
 
 Reports use read-only terminology:
 

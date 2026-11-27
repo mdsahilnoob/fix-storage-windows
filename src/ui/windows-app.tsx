@@ -160,7 +160,7 @@ export function createWindowsApp(ink: InkModule) {
         <Text dimColor>{state.scan.phase === "scanning" ? `measuring ${tilde(state.scan.current)}` : "analysis complete"}</Text>
         <Text color="cyan" wrap="truncate">{state.drives.map((item, index) => `${index === state.drive ? "[" : ""}${index + 1}:${item.name}${index === state.drive ? "]" : ""}`).join("  ")}</Text>
         <Text>{gb(state.scan.used)} used of {capacity(state.scan.total)} · {gb(state.scan.available)} free · {pct(state.scan.used, state.scan.total)} full</Text>
-        <Text dimColor>{`estimated category sizes: ${gb(state.scan.measured)} measured · ${size(state.reclaimable().junk + state.reclaimable().unused)} potentially recoverable`}</Text>
+        <Text dimColor>{`estimated category sizes: ${gb(state.scan.measured)} measured · ${size(state.reclaimable().junk + state.reclaimable().unused)} potentially recoverable (estimates may overlap)`}</Text>
         {drive ? <Text dimColor wrap="truncate">{[drive.fstype, drive.driveType, drive.label, drive.mount, drive.readOnly ? "read-only" : ""].filter(Boolean).join(" · ")}</Text> : null}
         <Meter store={store} />
         <Box flexGrow={1} marginTop={1}>

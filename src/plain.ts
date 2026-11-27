@@ -121,7 +121,7 @@ export function toJson(scan: ScanSnapshot, layout: Layout): string {
         })),
         blocked: scan.blocked,
         mode: "read-only-analysis-and-recommendations",
-        cleanup: { automatedCleanupSupported: false, estimatesOnly: true },
+        cleanup: { automatedCleanupSupported: false, estimatesOnly: true, categoryEstimatesMayOverlap: true },
       },
       null,
       2,
@@ -169,7 +169,7 @@ export function toText(scan: ScanSnapshot, layout: Layout, driveCount: number): 
     for (const path of scan.blocked.slice(0, 8)) lines.push(`  ${tilde(path)}`);
     if (scan.blocked.length > 8) lines.push(`  and ${scan.blocked.length - 8} more`);
   }
-  lines.push("", "READ-ONLY MODE — NO FILES WILL BE MODIFIED. Category sizes are estimates and cleanup opportunities are informational only.");
+  lines.push("", "READ-ONLY MODE — NO FILES WILL BE MODIFIED. Category sizes are estimates, may overlap, and must not be added as unique storage. Cleanup opportunities are informational only.");
   if (!IS_MAC && driveCount > 1) lines.push("", `${driveCount} drives mounted · fix-storage --drives lists them`);
   return lines.join("\n") + "\n";
 }

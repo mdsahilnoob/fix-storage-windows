@@ -147,7 +147,7 @@ function barModel(state: AppState): BarModel {
     segments: diskSegments(scan),
     hover: state.hover ?? focus,
     scanning: scan.phase === "scanning",
-    clearing: state.action?.id ?? null,
+    analyzing: state.action?.id ?? null,
   };
 }
 
@@ -303,7 +303,7 @@ function Totals({ state, store, fs }: Ctx) {
         <T fs={fs}>{known ? pct(scan.used, scan.total) : "…"}</T>
         <T fs={fs} color={MUTED}>{" full"}</T>
       </Box>
-      <T fs={fs} color={GREEN}>{`${size(store.reclaimable().junk + store.reclaimable().unused)} potentially recoverable · estimate only`}</T>
+      <T fs={fs} color={GREEN}>{`${size(store.reclaimable().junk + store.reclaimable().unused)} potentially recoverable · estimate only, may overlap`}</T>
     </Box>
   );
 }

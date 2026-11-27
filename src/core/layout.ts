@@ -6,13 +6,13 @@ import { canonical, MAC_DRIVE, mountOf, readMounts, type Drive } from "./drives"
 import { IS_MAC, IS_WINDOWS } from "./platform";
 import { windowsLayout } from "./windows/layout";
 
-/** How one drive is measured: its folders and categories, and what may be removed from it. */
+/** How one drive is measured: its folders and categories for read-only analysis. */
 export interface Layout {
   drive: Drive;
   home: string;
   /** Folders the scan measures, and the category each one counts toward. */
   roots: Root[];
-  /** Why nothing on this drive may be removed, or null when the usual rules apply. */
+  /** Why this drive is excluded from recommendations, or null when analysis is allowed. */
   lookOnly: string | null;
   /** True for a folder where a different drive is mounted. */
   foreign(path: string): boolean;
@@ -22,11 +22,11 @@ export interface Layout {
   canonical(path: string): string;
 }
 
-/** Why a drive of each kind is look only. */
+/** Why a drive is excluded from recommendations. */
 export const LOOK_ONLY = {
-  windows: "windows partition, look only · clean it up from windows",
-  linux: "another linux install, look only · clean it up from that system",
-  boot: "boot partition, look only · removing files here can stop your computer from starting",
+  windows: "windows partition, look only · managed by Windows",
+  linux: "another linux install, look only · managed by that system",
+  boot: "boot partition, look only · changing files here can stop your computer from starting",
 } as const;
 
 /** The startup disk's layout on a Mac, unchanged from before drives existed. */
@@ -244,7 +244,7 @@ const realpath = (path: string) => {
   }
 };
 
-/** Works out which folders to measure on a drive and what may be removed from it. */
+/** Works out which folders to measure on a drive for read-only analysis. */
 export async function layoutFor(drive: Drive, home: string = homedir()): Promise<Layout> {
   if (IS_MAC) return macLayout(home);
   if (IS_WINDOWS) return windowsLayout(drive, home);
@@ -302,7 +302,7 @@ export async function layoutFor(drive: Drive, home: string = homedir()): Promise
     if (onDrive(path)) roots.push({ path, category: "system" });
   }
 
-  // Each drive's own trash, where things removed from it go.
+  // Existing trash directories are measured for reporting only.
   for (const path of tops) {
     for (const trash of [join(path, `.Trash-${uid}`, "files"), join(path, ".Trash", String(uid), "files")]) {
       if (!roots.some((r) => r.path === trash)) roots.push({ path: trash, category: "trash" });
@@ -321,7 +321,7 @@ export async function layoutFor(drive: Drive, home: string = homedir()): Promise
   if (!lookOnly && drive.readOnly) {
     lookOnly =
       drive.fstype === "ntfs" || drive.fstype === "ntfs3"
-        ? "mounted read-only · windows may be hibernated (fast startup); shut windows down fully to write here"
+        ? "mounted read-only · Windows may be hibernated (fast startup)"
         : "this drive is mounted read-only";
   }
   return {

@@ -1,7 +1,7 @@
 {
   "name": "fix-storage-windows",
   "version": "0.1.0",
-  "description": "Native Windows 10 and 11 disk analysis and restore-friendly Recycle Bin cleanup from the terminal.",
+  "description": "Read-only Windows 10 and 11 storage analysis with cleanup recommendations; no files are modified.",
   "keywords": [
     "windows",
     "windows-10",
@@ -9,8 +9,8 @@
     "disk",
     "storage",
     "disk-usage",
-    "cleanup",
-    "recycle-bin",
+    "read-only",
+    "recommendations",
     "cache",
     "tui",
     "terminal",

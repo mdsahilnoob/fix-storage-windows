@@ -14,5 +14,5 @@ export const FILE_MANAGER = IS_MAC ? "Finder" : IS_WINDOWS ? "Explorer" : "your 
 /** Lowercase label for the reveal action. */
 export const REVEAL_LABEL = IS_MAC ? "reveal in finder" : IS_WINDOWS ? "show in explorer" : "show in file manager";
 
-/** Windows has one restore-friendly cleanup destination for every category. */
+/** Name of already-deleted storage locations that v1 reports but never changes. */
 export const TRASH_NAME = IS_WINDOWS ? "Windows Recycle Bin" : "Trash";

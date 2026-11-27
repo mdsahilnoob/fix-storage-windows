@@ -4,10 +4,11 @@ import { IS_MAC, IS_WINDOWS } from "./platform";
 import type { Item } from "./scan";
 
 /**
- * junk:   regenerates by itself or is a leftover; removing it loses nothing.
- * unused: probably not needed any more (old, or one of a kind you can redo); your call.
- * yours:  your data, in use; shown for context only.
- * system: the OS or a tool manages it; leave it to them.
+ * Informational verdicts used for read-only recommendations:
+ * junk:   likely regenerates by itself or is a leftover.
+ * unused: possibly not needed any more; your call to review.
+ * yours:  your data, shown for context only.
+ * system: managed by the OS or another tool; not a review candidate.
  */
 export type Verdict = "junk" | "unused" | "yours" | "system";
 
@@ -20,7 +21,7 @@ export interface Usage {
 
 export interface Label {
   verdict: Verdict;
-  /** Short, lowercase reason, e.g. "rebuilds with npm install". */
+  /** Short, lowercase reason, e.g. "rebuildable with npm install". */
   reason: string;
 }
 
@@ -90,40 +91,40 @@ function idle(usage: Usage | undefined, now: number): number | null {
   return usage ? now - usage.at : null;
 }
 
-/** What a piece of System data is, and the command that shrinks it when there is one. */
+/** Informational notes about system-managed storage; v1 performs no action. */
 const SYSTEM_REASONS: Array<[RegExp, string]> = [
-  [/^\/var\/cache\/pacman(\/|$)/, "pacman's package downloads · sudo paccache -rk1 keeps one version"],
-  [/^\/var\/cache\/apt(\/|$)/, "apt's package downloads · sudo apt clean"],
-  [/^\/var\/cache\/(dnf|libdnf5|yum)(\/|$)/, "dnf's package downloads · sudo dnf clean all"],
-  [/^\/var\/cache\/zypp(\/|$)/, "zypper's package downloads · sudo zypper clean"],
-  [/^\/var\/log\/journal(\/|$)/, "systemd journal · sudo journalctl --vacuum-size=500M shrinks it"],
+  [/^\/var\/cache\/pacman(\/|$)/, "package-manager downloads · managed by pacman"],
+  [/^\/var\/cache\/apt(\/|$)/, "package-manager downloads · managed by apt"],
+  [/^\/var\/cache\/(dnf|libdnf5|yum)(\/|$)/, "package-manager downloads · managed by dnf"],
+  [/^\/var\/cache\/zypp(\/|$)/, "package-manager downloads · managed by zypper"],
+  [/^\/var\/log\/journal(\/|$)/, "systemd journal · managed by the system"],
   [/^\/var\/log(\/|$)/, "system logs"],
-  [/^\/var\/lib\/systemd\/coredump(\/|$)/, "crash dumps · coredumpctl lists them; safe to delete with sudo"],
-  [/^\/var\/tmp(\/|$)/, "temporary files · systemd-tmpfiles clears old ones"],
+  [/^\/var\/lib\/systemd\/coredump(\/|$)/, "crash dumps · managed by systemd"],
+  [/^\/var\/tmp(\/|$)/, "temporary system files"],
   [/^\/var\/cache(\/|$)/, "system caches"],
-  [/^\/usr(\/|$)/, "installed packages · remove ones you don't use with your package manager"],
-  [/^\/nix(\/|$)/, "nix store · nix-collect-garbage -d frees old generations"],
-  [/^\/boot(\/|$)/, "kernels and boot files · removing them can stop your computer from starting"],
-  [/^\/(swapfile|swap)(\/|$)|\/swap(file)?(\.img)?$/i, "swap file · the system uses it as extra memory"],
-  [/^\/(\.snapshots|timeshift)(\/|$)/, "snapshots · remove old ones with snapper or timeshift"],
+  [/^\/usr(\/|$)/, "installed packages · managed by the package system"],
+  [/^\/nix(\/|$)/, "package store · managed by Nix"],
+  [/^\/boot(\/|$)/, "kernels and boot files · changing them can prevent startup"],
+  [/^\/(swapfile|swap)(\/|$)|\/swap(file)?(\.img)?$/i, "swap file · used by the system as extra memory"],
+  [/^\/(\.snapshots|timeshift)(\/|$)/, "snapshots · managed by snapshot tooling"],
   [/^\/etc(\/|$)/, "system settings"],
-  [/\/hiberfil\.sys$/i, "windows hibernation file · powercfg /h off in windows removes it"],
-  [/\/pagefile\.sys$/i, "windows page file · windows sizes it itself"],
-  [/\/swapfile\.sys$/i, "windows swap file"],
-  [/\/System Volume Information(\/|$)/, "restore points · manage them in windows system protection"],
-  [/\/Windows\/WinSxS(\/|$)/, "windows component store · disk cleanup in windows shrinks it"],
-  [/\/\$Windows\.~(BT|WS)(\/|$)/, "leftovers from a windows upgrade · disk cleanup in windows removes them"],
-  [/\/(Windows|Recovery|\$WinREAgent)(\/|$)/, "windows itself"],
-  [/\/EFI\/Microsoft(\/|$)/, "the windows boot loader · removing it stops windows from starting"],
-  [/\/EFI(\/|$)/, "boot loaders · removing them can stop your computer from starting"],
+  [/\/hiberfil\.sys$/i, "hibernation file · managed by Windows power settings"],
+  [/\/pagefile\.sys$/i, "Windows page file · sized by Windows"],
+  [/\/swapfile\.sys$/i, "Windows swap file"],
+  [/\/System Volume Information(\/|$)/, "restore points · managed by Windows System Protection"],
+  [/\/Windows\/WinSxS(\/|$)/, "Windows component store · managed by Windows servicing"],
+  [/\/\$Windows\.~(BT|WS)(\/|$)/, "Windows upgrade remnants · managed by Windows setup"],
+  [/\/(Windows|Recovery|\$WinREAgent)(\/|$)/, "Windows system files"],
+  [/\/EFI\/Microsoft(\/|$)/, "Windows boot loader · changing it can prevent startup"],
+  [/\/EFI(\/|$)/, "boot loaders · changing them can prevent startup"],
 ];
 
 function systemReason(path: string): string {
   if (IS_WINDOWS) {
-    if (/\/windows\/winsxs(\/|$)/.test(path)) return "windows component store · use Windows Disk Cleanup or DISM maintenance";
-    if (/\/windows\/softwaredistribution(\/|$)/.test(path)) return "windows update data · Windows Update and Disk Cleanup manage it";
-    if (/\/windows(\/|$)/.test(path)) return "windows itself · use Windows storage and servicing tools";
-    if (/\/\$windows\.~(bt|ws)(\/|$)/.test(path)) return "windows upgrade leftovers · use Windows Disk Cleanup";
+    if (/\/windows\/winsxs(\/|$)/.test(path)) return "Windows component store · managed by Windows servicing";
+    if (/\/windows\/softwaredistribution(\/|$)/.test(path)) return "Windows update data · managed by Windows Update";
+    if (/\/windows(\/|$)/.test(path)) return "Windows system files · managed by Windows";
+    if (/\/\$windows\.~(bt|ws)(\/|$)/.test(path)) return "Windows upgrade remnants · managed by Windows setup";
   }
   for (const [pattern, reason] of SYSTEM_REASONS) if (pattern.test(path)) return reason;
   return IS_MAC ? "managed by macOS" : IS_WINDOWS ? "managed by Windows" : "managed by the system";
@@ -142,45 +143,45 @@ export function classify(item: Item, category: CategoryId, usage?: Usage, now: n
   if (category === "system") return { verdict: "system", reason: systemReason(path) };
   if (category === "trash") return { verdict: "junk", reason: "already in the trash" };
   if (/\/softwaredistribution\/download/i.test(path))
-    return { verdict: "junk", reason: "windows update downloads · disk cleanup in windows clears them" };
+    return { verdict: "junk", reason: "Windows update downloads · managed by Windows Update" };
   if (category === "caches") return { verdict: "junk", reason: "cache · apps rebuild it when they need it" };
 
   // Windows application, package and game data is not interchangeable with a cache.
   if (IS_WINDOWS) {
     if (/\/(program files( \(x86\))?|programdata)(\/|$)/.test(path))
-      return { verdict: "system", reason: "installed or persistent application data · use the app's uninstaller" };
+      return { verdict: "system", reason: "installed or persistent application data · managed by its application" };
     if (/\/(docker|com\.docker\.docker)(\/|$)/.test(path))
-      return { verdict: "system", reason: "docker images, volumes and settings · manage them with docker" };
+      return { verdict: "system", reason: "Docker storage · managed by Docker" };
     if (/\/(pnpm\/store|\.nuget\/packages|\.m2\/repository|go\/pkg\/mod|\.cargo\/registry\/src)(\/|$)/.test(path))
-      return { verdict: "system", reason: "package manager store · manage it with its own clean or prune command" };
+      return { verdict: "system", reason: "package manager store · managed by its package manager" };
     if (/\/steamapps\/shadercache(\/|$)/.test(path) || /\/(shadercache|d3dscache)(\/|$)/.test(path))
       return { verdict: "junk", reason: "shader cache · the game or graphics driver rebuilds it" };
     if (/\/steamapps\/(downloading|temp)(\/|$)/.test(path))
       return { verdict: "unused", reason: "temporary launcher download · review it in the launcher" };
     if (/\/(savegames|saved games|saves)(\/|$)/.test(path)) return { verdict: "yours", reason: "game saves or user-created content" };
     if (/\/(steamapps\/common|xboxgames|epic games|riot games)(\/|$)/.test(path))
-      return { verdict: "system", reason: "game installation · uninstall or move it with its launcher" };
+      return { verdict: "system", reason: "game installation · managed by its launcher" };
   }
 
   // Things that rebuild themselves.
-  if (lower === "node_modules") return { verdict: "junk", reason: `rebuilds with npm install${untouched}` };
+  if (lower === "node_modules") return { verdict: "junk", reason: `rebuildable with npm install${untouched}` };
   if (BUILD_CACHES.has(lower)) return { verdict: "junk", reason: `build cache · rebuilds itself${untouched}` };
-  if (lower === "pods" && item.dir) return { verdict: "junk", reason: `rebuilds with pod install${untouched}` };
-  if (path.includes("/Xcode/DerivedData")) return { verdict: "junk", reason: "xcode build products · rebuild on next build" };
+  if (lower === "pods" && item.dir) return { verdict: "junk", reason: `rebuildable with pod install${untouched}` };
+  if (path.includes("/Xcode/DerivedData")) return { verdict: "junk", reason: "Xcode build products · rebuilt by the next build" };
   if (path.includes("/iOS DeviceSupport/") || path.includes("/watchOS DeviceSupport/"))
-    return { verdict: "junk", reason: "debug symbols for one device os · xcode fetches them again" };
+    return { verdict: "junk", reason: "device debug symbols · managed by Xcode" };
   if (path.includes("/CoreSimulator/Caches")) return { verdict: "junk", reason: "simulator cache" };
-  if (/\/steamapps\/shadercache(\/|$)/.test(path)) return { verdict: "junk", reason: "shader cache · steam rebuilds it" };
+  if (/\/steamapps\/shadercache(\/|$)/.test(path)) return { verdict: "junk", reason: "shader cache · rebuilt by Steam" };
   if (/\/\.var\/app\/[^/]+\/cache$/.test(path)) return { verdict: "junk", reason: "flatpak app cache · the app rebuilds it" };
 
   // Installers and leftovers.
-  if (INSTALLERS.has(ext)) return { verdict: "junk", reason: `installer · not needed once installed${untouched}` };
+  if (INSTALLERS.has(ext)) return { verdict: "junk", reason: `installer file · not needed after installation${untouched}` };
 
   // Probably not needed, but yours to decide.
   if ((lower === "target" || lower === "dist" || lower === "build" || lower === "out") && item.dir && path.includes("/"))
-    return { verdict: "unused", reason: `build output · rebuilds from source${untouched}` };
+    return { verdict: "unused", reason: `build output · rebuildable from source${untouched}` };
   if ((lower === ".venv" || lower === "venv" || lower === "env") && item.dir)
-    return { verdict: "unused", reason: `python environment · recreate with pip install${untouched}` };
+    return { verdict: "unused", reason: `Python environment · rebuildable from dependencies${untouched}` };
   if (path.includes("/CoreSimulator/Devices/")) return { verdict: "unused", reason: `simulator device${untouched}` };
   if (path.includes("/Xcode/Archives/")) return { verdict: "unused", reason: `old app archive${untouched}` };
   if (path.includes("/MobileSync/Backup/")) return { verdict: "unused", reason: `iphone or ipad backup${untouched}` };
@@ -188,26 +189,26 @@ export function classify(item: Item, category: CategoryId, usage?: Usage, now: n
   if (SCREEN_CAPTURE.test(name) && since !== null && since > 14 * DAY)
     return { verdict: "unused", reason: `screen capture from ${ago(since)}` };
   if (lower === "windows.old" && item.dir)
-    return { verdict: "unused", reason: "previous windows install · disk cleanup in windows removes it" };
+    return { verdict: "unused", reason: "previous Windows installation · managed by Windows setup" };
 
-  // Things a tool owns; deleting by hand breaks the tool.
+  // Storage owned by another tool; reported as system-managed.
   if (lower === "docker.raw" || path.includes("/com.docker.docker/"))
-    return { verdict: "system", reason: "docker's disk · shrink it with docker system prune" };
-  if (path.includes("/.ollama/models")) return { verdict: "system", reason: "local ai models · remove with ollama rm" };
+    return { verdict: "system", reason: "Docker storage · managed by Docker" };
+  if (path.includes("/.ollama/models")) return { verdict: "system", reason: "local AI models · managed by Ollama" };
   if (path.startsWith("/opt/homebrew") || path.startsWith("/usr/local/Cellar") || path.startsWith("/home/linuxbrew/"))
-    return { verdict: "system", reason: "homebrew manages this · brew cleanup removes old versions" };
+    return { verdict: "system", reason: "Homebrew-managed storage" };
   if (/^\/var\/lib\/docker(\/|$)|\/\.local\/share\/docker(\/|$)/.test(path))
-    return { verdict: "system", reason: "docker's images and volumes · shrink them with docker system prune" };
+    return { verdict: "system", reason: "Docker images and volumes · managed by Docker" };
   if (/^\/var\/lib\/containers(\/|$)|\/\.local\/share\/containers(\/|$)/.test(path))
-    return { verdict: "system", reason: "podman's images · shrink them with podman system prune" };
+    return { verdict: "system", reason: "Podman images · managed by Podman" };
   if (/^\/var\/lib\/flatpak(\/|$)|\/\.local\/share\/flatpak(\/|$)/.test(path))
-    return { verdict: "system", reason: "flatpak manages this · flatpak uninstall --unused removes leftovers" };
+    return { verdict: "system", reason: "Flatpak-managed storage" };
   if (/^\/var\/lib\/snapd(\/|$)/.test(path))
-    return { verdict: "system", reason: "snap manages this · snap remove --revision drops old versions" };
+    return { verdict: "system", reason: "Snap-managed storage" };
   if (/^\/var\/lib\/libvirt(\/|$)/.test(path))
-    return { verdict: "system", reason: "virtual machines · remove them in virt-manager" };
+    return { verdict: "system", reason: "virtual machines · managed by virtualization tooling" };
   if (!IS_MAC && /^\/(opt|usr\/local)(\/|$)/.test(path))
-    return { verdict: "system", reason: "installed software · uninstall it with your package manager" };
+    return { verdict: "system", reason: "installed software · managed by the package manager" };
 
   // Windows modification time is not last-used evidence and never by itself
   // makes an item a deletion recommendation.

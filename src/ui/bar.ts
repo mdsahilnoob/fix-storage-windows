@@ -13,7 +13,8 @@ export interface Segment {
 export function diskSegments({ sizes, total, used }: ScanSnapshot): Segment[] {
   const measured = CATEGORIES.reduce((sum, c) => sum + sizes[c.id], 0);
   const occupied = total > 0 ? Math.min(1, Math.max(0, used / total)) : 0;
-  // Fit estimates into the occupied space, keeping their relative proportions.
+  // Category estimates can overlap; scale them into occupied disk space for a
+  // proportional visual only. Never treat their sum as unique storage.
   const fraction = measured > 0 ? Math.min(1 / Math.max(total, 1), occupied / measured) : 0;
   const segments = CATEGORIES.map<Segment>((c) => ({ id: c.id, color: c.color, fraction: sizes[c.id] * fraction }));
   segments.push({ id: UNMEASURED, color: [90, 90, 90], fraction: Math.max(0, occupied - measured * fraction) });
@@ -26,8 +27,8 @@ export interface BarModel {
   hover: string | null;
   /** Shows the bright leading edge while sizes are still coming in. */
   scanning: boolean;
-  /** Segment being deleted; it sheds particles as it shrinks. */
-  clearing: string | null;
+  /** Segment currently being analyzed; visual highlight only. */
+  analyzing: string | null;
 }
 
 export interface Presenter {
@@ -80,7 +81,7 @@ export class BarCanvas {
   private placed: Placed[] = [];
   private time = 0;
   private edge = 0;
-  private model: BarModel = { segments: [], hover: null, scanning: false, clearing: null };
+  private model: BarModel = { segments: [], hover: null, scanning: false, analyzing: null };
 
   constructor(
     private readonly presenter: Presenter,
@@ -116,8 +117,8 @@ export class BarCanvas {
     if (this.width === 0) return false;
     dt = Math.min(dt, 0.1);
     this.time += dt;
-    const { segments, hover, clearing, scanning } = this.model;
-    let moving = scanning || clearing !== null;
+    const { segments, hover, analyzing, scanning } = this.model;
+    let moving = scanning || analyzing !== null;
 
     const ease = Math.min(1, dt * 9);
     const fade = Math.min(1, dt * 12);
@@ -138,7 +139,7 @@ export class BarCanvas {
       else moving = true;
       this.level.set(segment.id, next);
 
-      if (clearing === segment.id && to < from) {
+      if (analyzing === segment.id && to < from) {
         this.shed((cursor + from) * barWidth, (from - to) * barWidth, segment.color);
       }
       cursor += to;
@@ -253,7 +254,7 @@ export class BarCanvas {
 
   private draw() {
     const { width, height, cell, buffer, background } = this;
-    const { clearing } = this.model;
+    const { analyzing } = this.model;
     const top = this.top;
 
     for (let i = 0; i < buffer.length; i += 4) {
@@ -291,10 +292,10 @@ export class BarCanvas {
       while (index < this.placed.length && cx >= this.placed[index].x1) index++;
       const segment = this.placed[index];
       const within = segment !== undefined && cx >= segment.x0 + inset && cx <= segment.x1 - inset;
-      // Columns near the growing edge of a scan, or the shrinking edge of a clear, burn white.
+      // Columns near the growing edge of a scan, or the active analysis focus, burn white.
       const lead = this.edge > 0 && cx <= filled ? Math.max(0, 1 - (filled - cx) / (cell * 3)) * this.edge : 0;
       const burn =
-        within && clearing === segment.id ? Math.max(0, 1 - (segment.x1 - cx) / (cell * 2.5)) : 0;
+        within && analyzing === segment.id ? Math.max(0, 1 - (segment.x1 - cx) / (cell * 2.5)) : 0;
       const hot = Math.max(lead, burn);
 
       for (let row = 0; row < BAR_ROWS; row++) {
