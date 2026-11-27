@@ -3,11 +3,10 @@ import type { Color, NodeHandle, Root, Style } from "@zenbu-labs/pixel";
 import { basename, dirname } from "node:path";
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { CATEGORIES, CATEGORY, TIER_LABEL, type Category, type CategoryId, type Rgb, type Tier } from "../core/categories";
-import { deletesForGood, type Culprit } from "../core/browse";
+import type { Culprit } from "../core/browse";
 import { classify, shortAge, type Verdict } from "../core/classify";
-import type { Clearable } from "../core/clean";
 import { capacity, gb, size, tilde } from "../core/format";
-import { IS_MAC, IS_WINDOWS, REVEAL_LABEL, TRASH_NAME } from "../core/platform";
+import { IS_MAC, IS_WINDOWS, REVEAL_LABEL } from "../core/platform";
 import type { Item } from "../core/scan";
 import { BAR_ROWS, BarCanvas, HEADROOM_ROWS, diskSegments, type BarModel } from "./bar";
 import { MAX_ROWS, type AppState, type Store } from "./store";
@@ -36,11 +35,11 @@ const VERDICT: Record<Verdict, { color: Rgb; text: Color; tag: string }> = {
 const ch = (fs: number, n: number) => fs * 0.6 * n;
 
 /** macOS puts a narrow no-break space before AM/PM in screenshot names; many fonts draw it as a box. */
-const clean = (name: string) => name.replace(/[\u202f\u00a0]/g, " ");
+const cleanName = (name: string) => name.replace(/[\u202f\u00a0]/g, " ");
 
-const ACTION = {
-  caches: { label: "clear caches", doing: "clearing caches" },
-  trash: { label: "empty trash", doing: "emptying the trash" },
+const REVIEW_LABELS = {
+  caches: "review caches",
+  trash: "check Recycle Bin usage",
 } as const;
 
 const pct = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "0%");
@@ -238,13 +237,13 @@ function DriveTabs({ state, store, fs }: Ctx) {
 
 function TopLine(ctx: Ctx) {
   const { state, store, fs } = ctx;
-  const mode = store.options.demo ? "demo disk" : store.options.dryRun ? "dry run" : null;
+  const mode = store.options.demo ? "demo disk" : null;
   const { scan, action } = state;
   let status: ReactNode;
   if (action) {
     status = (
       <>
-        <T fs={fs} color={CATEGORY[action.id].color} style={{ margin: { right: ch(fs, 2) } }}>{ACTION[action.id].doing + (store.pretend ? " (dry run)" : "")}</T>
+        <T fs={fs} color={CATEGORY[action.id].color} style={{ margin: { right: ch(fs, 2) } }}>preparing recommendation</T>
         <T fs={fs} color={FAINT} style={{ flexShrink: 1, ellipsis: true }}>{tilde(action.current)}</T>
       </>
     );
@@ -289,7 +288,7 @@ function Sep({ fs }: { fs: number }) {
   );
 }
 
-function Totals({ state, fs }: Ctx) {
+function Totals({ state, store, fs }: Ctx) {
   const { scan } = state;
   const known = scan.total > 0;
   return (
@@ -304,13 +303,7 @@ function Totals({ state, fs }: Ctx) {
         <T fs={fs}>{known ? pct(scan.used, scan.total) : "…"}</T>
         <T fs={fs} color={MUTED}>{" full"}</T>
       </Box>
-      {IS_WINDOWS || state.freed > 0 ? (
-        <T fs={fs} color={GREEN}>{IS_WINDOWS ? `~${gb(state.freed)} net free-space increase observed · ~${gb(state.movedToRecycleBinBytes)} in ${TRASH_NAME}` : `~${gb(state.freed)} cleared this session`}</T>
-      ) : !IS_MAC && state.drives[state.drive] ? (
-        <T fs={fs} color={FAINT} style={{ flexShrink: 1, ellipsis: true, margin: { left: ch(fs, 2) } }}>
-          {driveDetail(state)}
-        </T>
-      ) : null}
+      <T fs={fs} color={GREEN}>{`${size(store.reclaimable().junk + store.reclaimable().unused)} potentially recoverable · estimate only`}</T>
     </Box>
   );
 }
@@ -364,33 +357,26 @@ function QuickWins({ state, store, fs }: Ctx) {
       </Box>
     );
   }
-  if (state.scan.phase !== "done") return <T fs={fs} color={FAINT}>looking for space you can get back…</T>;
-  const ids = (["caches", "trash"] as Clearable[]).filter((id) => store.canClear(id) || state.action?.id === id);
-  if (ids.length === 0) return <T fs={fs} color={FAINT}>nothing left that is safe to clear</T>;
+  if (state.scan.phase !== "done") return <T fs={fs} color={FAINT}>looking for storage opportunities…</T>;
+  const ids = (["caches", "trash"] as const).filter((id) => store.canReview(id) || state.action?.id === id);
+  if (ids.length === 0) return <T fs={fs} color={FAINT}>no prominent cache or Trash opportunities</T>;
   const total = ids.reduce((sum, id) => sum + state.scan.sizes[id], 0);
-  const busy = state.action !== null || state.removing !== null;
+  const busy = state.action !== null;
   return (
     <Box style={{ flexDirection: "column", gap: fs * 0.35 }}>
       <Box>
         <T fs={fs} color={GREEN} bold>{gb(total)}</T>
-        <T fs={fs} color={MUTED}>{" safe to clear"}</T>
+        <T fs={fs} color={MUTED}>{" estimated opportunity"}</T>
       </Box>
-      {ids.map((id) => {
-        const armed = state.confirm?.kind === "category" && state.confirm.id === id;
-        return (
-          <Box key={id} style={{ gap: fs * 0.6 }}>
-            <T fs={fs} color={CATEGORY[id].color}>■</T>
-            {armed ? (
-              <T fs={fs} color={RED} onClick={() => store.press(id)}>{IS_WINDOWS ? `move ${gb(state.confirm.bytes ?? state.scan.sizes[id])} to the Recycle Bin? press again` : `delete ${gb(state.scan.sizes[id])} for good? press again`}</T>
-            ) : (
-              <Box style={{ pointerShape: busy ? "default" : "pointer" }} onClick={busy ? undefined : () => store.press(id)}>
-                <T fs={fs} color={busy ? FAINT : MUTED} style={{ width: ch(fs, 13) }}>{ACTION[id].label}</T>
-                <T fs={fs} color={busy ? FAINT : MUTED}>{gb(state.scan.sizes[id]).padStart(9)}</T>
-              </Box>
-            )}
+      {ids.map((id) => (
+        <Box key={id} style={{ gap: fs * 0.6 }}>
+          <T fs={fs} color={CATEGORY[id].color}>■</T>
+          <Box style={{ pointerShape: busy ? "default" : "pointer" }} onClick={busy ? undefined : () => void store.reviewCategory(id)}>
+            <T fs={fs} color={busy ? FAINT : MUTED} style={{ width: ch(fs, 13) }}>{REVIEW_LABELS[id]}</T>
+            <T fs={fs} color={busy ? FAINT : MUTED}>{gb(state.scan.sizes[id]).padStart(9)}</T>
           </Box>
-        );
-      })}
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -446,8 +432,7 @@ function InsideHeader(ctx: Ctx) {
   const category = CATEGORY[state.selected];
   const scope = store.scopeSize();
   const top = state.stack[state.stack.length - 1];
-  const canClear = !top && store.canClear(category.id);
-  const armed = canClear && state.confirm?.kind === "category" && state.confirm.id === category.id;
+  const reviewable = !top && store.canReview(category.id);
   return (
     <Box style={{ flexDirection: "column", gap: fs * 0.35, flexShrink: 0 }}>
       <Box style={{ justifyContent: "space-between", gap: fs * 2 }}>
@@ -464,12 +449,8 @@ function InsideHeader(ctx: Ctx) {
         <T fs={fs} color={FAINT} style={{ flexShrink: 1, ellipsis: true }}>
           {top ? tilde(top.path) : category.blurb}
         </T>
-        {canClear ? (
-          armed ? (
-            <T fs={fs} color={RED} onClick={() => store.press(category.id as Clearable)}>{IS_WINDOWS ? `c again to recycle ${gb(state.confirm.bytes ?? scope)}` : `c again to delete all ${gb(scope)}`}</T>
-          ) : (
-            <Hint fs={fs} k="c" label={ACTION[category.id as Clearable].label} keyColor={GREEN} onClick={() => store.press(category.id as Clearable)} />
-          )
+        {reviewable ? (
+          <Hint fs={fs} k="c" label={REVIEW_LABELS[category.id as "caches" | "trash"]} keyColor={GREEN} onClick={() => void store.reviewCategory(category.id as "caches" | "trash")} />
         ) : null}
       </Box>
       <Reclaimable {...ctx} />
@@ -532,7 +513,7 @@ function ItemLine({ item, index, max, rowRef, ...ctx }: Ctx & { item: Item; inde
   const label = store.label(item);
   const verdict = VERDICT[label.verdict];
   const used = state.usage[item.path];
-  const name = clean(basename(item.path) || item.path);
+  const name = cleanName(basename(item.path) || item.path);
   return (
     <Box
       ref={rowRef}
@@ -544,7 +525,7 @@ function ItemLine({ item, index, max, rowRef, ...ctx }: Ctx & { item: Item; inde
       </T>
       <T fs={fs} color={item.dir ? category.color : FAINT} style={{ width: ch(fs, 1) }}>{item.dir ? "▸" : ""}</T>
       <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, overflow: "hidden" }}>
-        <T fs={fs} color={state.removing === item.path ? FAINT : selected ? FG : "#b5b5b5"} bold={selected} style={{ flexShrink: 1, ellipsis: true }}>
+        <T fs={fs} color={selected ? FG : "#b5b5b5"} bold={selected} style={{ flexShrink: 1, ellipsis: true }}>
           {name + (item.dir ? "/" : "")}
         </T>
         {state.stack.length === 0 ? (
@@ -567,7 +548,7 @@ function CulpritLine({ item, culprit, fs, color, category }: { item: Item; culpr
   return (
     <Box style={{ alignItems: "center", height: fs * 1.45, flexShrink: 0, padding: { left: ch(fs, 4) }, overflow: "hidden" }}>
       <T fs={fs} color={FAINT} style={{ margin: { right: ch(fs, 1) } }}>└ mostly in</T>
-      <T fs={fs} color={color} style={{ flexShrink: 1, ellipsis: true }}>{clean(relative(item.path, last.path)) + (last.dir ? "/" : "")}</T>
+      <T fs={fs} color={color} style={{ flexShrink: 1, ellipsis: true }}>{cleanName(relative(item.path, last.path)) + (last.dir ? "/" : "")}</T>
       <T fs={fs} color={MUTED} style={{ margin: { left: ch(fs, 2) } }}>{size(last.size)}</T>
       <T fs={fs} color={FAINT} style={{ margin: { left: ch(fs, 1) } }}>{`· ${pct(last.size, item.size)}`}</T>
       {VERDICT[verdict].tag && verdict !== "yours" ? (
@@ -580,10 +561,7 @@ function CulpritLine({ item, culprit, fs, color, category }: { item: Item; culpr
 /** What the highlighted item is, where its space is, and what you can do with it. */
 function ItemDetails({ item, index, ...ctx }: Ctx & { item: Item; index: number }) {
   const { state, store, fs } = ctx;
-  const forGood = deletesForGood(state.selected);
-  const blocked = store.blocked(item);
-  const armed = state.confirm?.kind === "item" && state.confirm.path === item.path;
-  const removing = state.removing === item.path;
+  const limit = store.reviewLimit(item);
   const label = store.label(item);
   const verdict = VERDICT[label.verdict];
   const culprit = item.dir ? state.culprits[item.path] : undefined;
@@ -610,31 +588,18 @@ function ItemDetails({ item, index, ...ctx }: Ctx & { item: Item; index: number 
         <Box style={{ ...line, ...indent }}>
           <T fs={fs} color={FAINT} style={{ margin: { right: ch(fs, 1) } }}>└ spread out:</T>
           <T fs={fs} color={MUTED} style={{ flexShrink: 1, ellipsis: true }}>
-            {culprit.top.map((t) => `${clean(basename(t.path))} ${size(t.size)}`).join("  ·  ")}
+            {culprit.top.map((t) => `${cleanName(basename(t.path))} ${size(t.size)}`).join("  ·  ")}
           </T>
         </Box>
       ) : null}
 
       <Box style={{ ...line, ...indent, gap: ch(fs, 3) }}>
-        {removing ? (
-          <T fs={fs} color={MUTED}>{forGood ? "deleting…" : "moving to trash…"}</T>
-        ) : (
-          <>
-            {item.dir ? <Hint fs={fs} k="→" label="open" onClick={() => store.open(index)} /> : null}
-            {hasCulprit ? <Hint fs={fs} k="g" label="go to culprit" keyColor={AMBER} onClick={() => store.goToCulprit(index)} /> : null}
-            <Hint fs={fs} k="o" label={REVEAL_LABEL} onClick={() => void store.reveal(index)} />
-            {state.selected === "system" ? null : armed ? (
-              <T fs={fs} color={RED} bold onClick={() => store.removeItem(index)}>
-                {forGood ? `⌫ again to delete ${size(item.size)} for good` : `⌫ again to move ${size(item.size)} to trash`}
-              </T>
-            ) : blocked ? (
-              <T fs={fs} color={FAINT}>{`can't remove: ${blocked.toLowerCase()}`}</T>
-            ) : (
-              <Hint fs={fs} k="⌫" label={forGood ? "delete" : "move to trash"} keyColor={RED} onClick={() => store.removeItem(index)} />
-            )}
-          </>
-        )}
+        {item.dir ? <Hint fs={fs} k="→" label="open" onClick={() => store.open(index)} /> : null}
+        {hasCulprit ? <Hint fs={fs} k="g" label="go to culprit" keyColor={AMBER} onClick={() => store.goToCulprit(index)} /> : null}
+        <Hint fs={fs} k="o" label={REVEAL_LABEL} onClick={() => void store.reveal(index)} />
+        <Hint fs={fs} k="c" label={limit ? "review limited" : "review recommendation"} keyColor={GREEN} onClick={() => store.reviewItem(index)} />
       </Box>
+      {limit ? <T fs={fs} color={FAINT}>{limit.toLowerCase()} · informational only</T> : null}
     </Box>
   );
 }
@@ -709,8 +674,8 @@ function Inside(ctx: Ctx) {
 function BottomLine({ state, fs }: Ctx) {
   const keys: Array<[string, string]> =
     state.pane === "list"
-      ? [["↑↓", "move"], ["→", "open"], ["←", "back"], ["g", "culprit"], ["f", "junk only"], ["o", "reveal"], ["⌫", "remove"], ["q", "quit"]]
-      : [["↑↓", "category"], ["→", "look inside"], ["f", "junk only"], ["c", "clear"], ...(state.drives.length > 1 ? [["v", "drive"] as [string, string]] : []), ["r", "rescan"], ["q", "quit"]];
+      ? [["↑↓", "move"], ["→", "open"], ["←", "back"], ["g", "culprit"], ["f", "junk only"], ["o", "reveal"], ["c", "recommend"], ["q", "quit"]]
+      : [["↑↓", "category"], ["→", "look inside"], ["f", "junk only"], ["c", "recommend"], ...(state.drives.length > 1 ? [["v", "drive"] as [string, string]] : []), ["r", "rescan"], ["q", "quit"]];
   return (
     <Box style={{ justifyContent: "space-between", gap: fs * 2, flexShrink: 0 }}>
       <Box style={{ gap: fs * 1.4, flexShrink: 0 }}>
@@ -750,6 +715,7 @@ export function App({ root, store }: { root: Root; store: Store }) {
       }}
     >
       <TopLine {...ctx} />
+      <T fs={fs} color={GREEN} bold>READ-ONLY MODE — NO FILES WILL BE MODIFIED</T>
       <Box style={{ height: fs * 0.4, flexShrink: 0 }} />
       <Totals {...ctx} />
       {scan.phase === "scanning" || excess > 0 ? (
@@ -762,6 +728,14 @@ export function App({ root, store }: { root: Root; store: Store }) {
         <Categories {...ctx} width={left} />
         <Inside {...ctx} />
       </Box>
+      {state.recommendation ? (
+        <Box style={{ flexDirection: "column", flexShrink: 0 }}>
+          <T fs={fs} color={GREEN} bold>{state.recommendation.title}</T>
+          <T fs={fs} color={MUTED} wrap>{`${size(state.recommendation.estimatedBytes)} estimated cleanup opportunity · ${state.recommendation.reason}`}</T>
+          <T fs={fs} color={FAINT}>Informational only. Review these paths yourself outside the application.</T>
+        </Box>
+      ) : null}
+      {state.action ? <T fs={fs} color={AMBER}>{`analyzing ${CATEGORY[state.action.id].name}: ${tilde(state.action.current)}`}</T> : null}
       <BottomLine {...ctx} />
     </Box>
   );

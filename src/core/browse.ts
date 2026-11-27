@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promises as fsp } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CategoryId } from "./categories";
 import { isWhole, type Usage } from "./classify";
@@ -11,9 +11,7 @@ import { normalPath, windowsEntryKind } from "./windows/paths";
 import { cannotRemoveWindows } from "./windows/permissions";
 import { revealWindows } from "./windows/reveal";
 import { findWindowsCulprit } from "./windows/scan";
-import { recycleWindows } from "./windows/trash";
 import { du, type Item } from "./scan";
-import { forgetTrashInfo, trashLinux } from "./trash";
 
 export interface ListHandle {
   cancel(): void;
@@ -400,8 +398,8 @@ const LINUX_MANAGED = [
   "/proc", "/sys", "/dev", "/snap", "/nix", "/.snapshots", "/timeshift", "/swapfile", "/swap", "/home/linuxbrew",
 ];
 
-/** Why an item cannot be removed, or null when it can. */
-export function cannotRemove(path: string, layout: Layout): string | null {
+/** Why an item is excluded from recommendations, or null when review is allowed. */
+export function reviewRestriction(path: string, layout: Layout): string | null {
   if (IS_WINDOWS) return cannotRemoveWindows(path, layout);
   if (!path.startsWith("/")) return "Not a real path.";
   if (layout.lookOnly) return capitalize(layout.lookOnly) + ".";
@@ -423,11 +421,6 @@ export function cannotRemove(path: string, layout: Layout): string | null {
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** True when the item lives where permanent deletion is fine: caches and the Trash. */
-export function deletesForGood(category: CategoryId): boolean {
-  return !IS_WINDOWS && (category === "caches" || category === "trash");
-}
-
 function run(file: string, args: string[]): Promise<void> {
   return new Promise((done, fail) => {
     execFile(file, args, (error, _stdout, stderr) => {
@@ -435,54 +428,6 @@ function run(file: string, args: string[]): Promise<void> {
       else done();
     });
   });
-}
-
-/**
- * Moves a file or folder to the Trash, where it can be put back from Finder or
- * the file manager, and returns roughly where it went.
- */
-export async function moveToTrash(path: string, layout: Layout): Promise<string> {
-  if (IS_WINDOWS) {
-    const result = await recycleWindows([path], layout);
-    if (result.moved.length !== 1) {
-      const detail = result.unknown[0]?.error ?? result.failed[0]?.error ?? "Windows did not confirm a Recycle Bin destination; manual inspection is required.";
-      throw new Error(detail);
-    }
-    return trashPathFor(path, layout);
-  }
-  if (!IS_MAC) return trashLinux(path, layout.home);
-  try {
-    await fsp.access("/usr/bin/trash");
-    await run("/usr/bin/trash", [path]);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    await run("osascript", [
-      "-e",
-      "on run argv",
-      "-e",
-      'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)',
-      "-e",
-      "end run",
-      path,
-    ]);
-  }
-  return trashPathFor(path, layout);
-}
-
-/** Where moving an item to the Trash puts it, near enough to list it there (and for dry runs). */
-export function trashPathFor(path: string, layout: Layout): string {
-  if (IS_WINDOWS) return join(layout.drive.mount, "$Recycle.Bin");
-  if (IS_MAC) return join(layout.home, ".Trash", basename(path));
-  if (layout.drive.home) return join(homeTrash(layout.home), "files", basename(path));
-  const uid = typeof process.getuid === "function" ? process.getuid() : 0;
-  return join(layout.drive.mount, `.Trash-${uid}`, "files", basename(path));
-}
-
-/** Deletes for good. Only used for caches and things already in the Trash. */
-export async function deleteForGood(path: string, category: CategoryId): Promise<void> {
-  if (IS_WINDOWS) throw new Error("Permanent deletion is prohibited on Windows. Use the Recycle Bin workflow.");
-  await fsp.rm(path, { recursive: true, force: true });
-  if (!IS_MAC && category === "trash") await forgetTrashInfo(path);
 }
 
 /**

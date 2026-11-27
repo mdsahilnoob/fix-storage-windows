@@ -14,9 +14,10 @@ export type CategoryId =
   | "trash";
 
 /**
- * safe:   regenerates on its own or was already thrown away; clearing loses nothing.
- * review: yours to decide; the tool shows it but never deletes it for you.
- * keep:   personal data or managed by the system; never offered for deletion.
+ * v1 tiers are informational review hints only. The application never acts on them.
+ * safe:   likely rebuildable or already discarded; may be worth reviewing.
+ * review: yours to decide; shown for review only.
+ * keep:   personal or system-managed data; generally not a review candidate.
  */
 export type Tier = "safe" | "review" | "keep";
 
@@ -100,7 +101,7 @@ export const CATEGORY: Record<CategoryId, Category> = Object.fromEntries(
 ) as Record<CategoryId, Category>;
 
 export const TIER_LABEL: Record<Tier, string> = {
-  safe: "Safe to clear",
+  safe: "Potential savings",
   review: "Review first",
   keep: "Keep",
 };
@@ -175,5 +176,5 @@ export function roots(home: string = homedir()): Root[] {
   ];
 }
 
-/** The categories this tool is willing to clear, in the order it suggests them. */
-export const CLEARABLE: Array<Extract<CategoryId, "caches" | "trash">> = ["caches", "trash"];
+/** Categories with prominent informational review estimates. */
+export const REVIEWABLE: Array<Extract<CategoryId, "caches" | "trash">> = ["caches", "trash"];

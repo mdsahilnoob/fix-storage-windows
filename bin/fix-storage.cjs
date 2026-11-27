@@ -9,21 +9,25 @@ const appDir = path.resolve(__dirname, "..");
 const linux = process.platform === "linux";
 const windows = process.platform === "win32";
 
-const HELP = `fix-storage: see what is filling your ${windows ? "Windows drives" : linux ? "disks" : "Mac's disk"} and clear what is safe to clear.
+const HELP = `fix-storage v1: READ-ONLY storage analysis and cleanup recommendations.
+
+No files are deleted, recycled, moved, renamed or modified.
 
 Usage: fix-storage [options]
 
-  (no options)   Open the interactive view. ${windows ? "Uses a character-based React UI\n                 in Windows Terminal, PowerShell, or Windows Console." : `Needs a terminal with kitty
-                 graphics (Ghostty, kitty, iTerm2, WezTerm); other terminals
-                 get a simpler character view.`}
-  --dry-run      Interactive view, but clearing only pretends: nothing is moved or deleted.
-  --demo         Interactive view on a made-up disk. Reads and deletes nothing.
-  --plain        Print a text summary and exit. Deletes nothing.
-  --json         Print the summary as JSON and exit. Deletes nothing.
+  (no options)   Open the interactive analysis view. ${windows ? "Uses a character-based React UI\n                 in Windows Terminal, PowerShell, or Windows Console." : `Needs a terminal with kitty
+                  graphics (Ghostty, kitty, iTerm2, WezTerm); other terminals
+                  get a simpler character view.`}
+  --demo         Use a made-up disk; reads and changes nothing.
+  --plain        Print a text storage report and exit.
+  --json         Print the storage report as JSON and exit.
 ${linux || windows ? `  --drives       List mounted drives${windows ? " and volumes without access paths" : ", and partitions that are not mounted"}, and exit.
   --drive <d>    Start on drive <d>: its number from --drives, its name, mount
-                 point, label or device, or any path on it.
+                  point, label or device, or any path on it.
 ` : ""}  -h, --help     Show this help.
+
+Automated cleanup is not supported in v1. Recommendations are informational
+only; you decide whether to act on them outside this application.
 `;
 
 if (args.includes("-h") || args.includes("--help")) {
@@ -31,7 +35,22 @@ if (args.includes("-h") || args.includes("--help")) {
   process.exit(0);
 }
 
-const known = new Set(["--dry-run", "--demo", "--plain", "--json", "--drives"]);
+const cleanupOptions = new Set([
+  "--clean", "--cleanup", "--delete", "--remove", "--recycle", "--trash",
+  "--apply", "--execute", "--empty-trash", "--empty-recycle-bin", "--purge", "--dry-run",
+]);
+for (const arg of args) {
+  if (cleanupOptions.has(arg) || cleanupOptions.has(arg.split("=")[0])) {
+    process.stderr.write(
+      `fix-storage: automated cleanup is not supported in v1.\n` +
+      `The application is READ-ONLY and never deletes, recycles, moves or modifies files.\n` +
+      `View storage analysis and recommendations with --plain, --json or the interactive view.\n\n${HELP}`,
+    );
+    process.exit(2);
+  }
+}
+
+const known = new Set(["--demo", "--plain", "--json", "--drives"]);
 let unknown;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];

@@ -1,56 +1,48 @@
-# Original-code compatibility audit
+# Compatibility audit
 
-## Repository boundary
+## Repository history
 
-At the initial inspection, `fix-storage` was a clean Git repository on `main` and `fix-storage-windows` was an empty directory. Only project content was copied, never `.git`. The Windows port was later initialized as its own Git repository on `main`. No original file was modified, no dependencies were installed in the original, and no tests were run in either directory.
+At initial inspection, `fix-storage` was a clean Git repository on `main` and `fix-storage-windows` was an empty directory. Only project content was copied, never `.git`. The Windows port was later initialized as its own Git repository on `main`. No original file was modified, no dependencies were installed in the original, and no tests were run in either directory.
 
-## Original architecture
+## Original architecture retained
 
-The original CLI shim routes to plain output or a Pixel React terminal process. `Store` coordinates drive loading, scanning, category/folder navigation, enrichment, confirmation, cleanup and dry-run. Core modules provide category models, POSIX drive discovery, layouts, `du` measurement, classification, Finder/file-manager reveal, macOS/freedesktop Trash, and permanent cache/Trash deletion. One Bun test file covers disk accounting and dry-run behavior.
+- category IDs, order and tier model;
+- `Drive`, `Layout`, `Item` and `ScanSnapshot` data structures;
+- `Store` navigation, cancellation, caching and filtering;
+- plain and JSON presentation;
+- demo scan model;
+- classification concepts;
+- culprit analysis;
+- Unix/macOS reference source, preserved but non-authoritative for v1.
 
-Reused in the port:
+## v1 product change
 
-- CLI option shapes and plain/JSON schemas;
-- category IDs/order/tiers, `Drive`, `Layout`, `Item`, `ScanSnapshot` and result models;
-- store navigation, cancellation tickets, caching, two-step actions, demo and dry-run;
-- classification concepts, culprit behavior and text formatting;
-- Unix/macOS implementations as read-only reference behavior inside this port.
+The original cleanup workflows have been replaced by read-only recommendations. This is a deliberate product decision for v1, not a runtime toggle.
 
-## Incompatibilities found
-
-| Original assumption | Native Windows replacement |
+| Earlier behavior | v1 behavior |
 | --- | --- |
-| Only `darwin` and `linux` allowed | Windows-only x64 package metadata for the independent port |
-| `!IS_MAC` means Linux | Explicit `IS_WINDOWS` and platform labels |
-| `/proc/self/mountinfo`, `lsblk`, UDisks | CIM `Win32_Volume`/`Win32_MountPoint`, GUID identity, Disk Management advice |
-| Unix `du` and `ps` | Asynchronous Node walker and depth-limited culprit walk |
-| POSIX case-sensitive `/` paths | Case-insensitive normalized Windows containment and separator-aware ancestry |
-| `stat.blocks * 512` | Logical `stat.size` on Windows (allocated-size limitation documented) |
-| Recycled cache bytes counted as freed | Separate `movedToRecycleBinBytes`; `freed` only from fresh disk measurement |
-| Spotlight or Linux atime | Modification time only, never labelled last-opened |
-| Finder/D-Bus/xdg-open | Explorer open/select process arguments without a shell |
-| macOS/freedesktop Trash | Native C# `IFileOperation` bridge with pre-delete and post-delete recycle-only guards |
-| Permanent caches/Trash deletion | Prohibited on Windows; all cleanup recycles and Recycle Bin clearing is disabled |
-| Original bulk clean skipped central removal guard | Both item and bulk paths call `cannotRemoveWindows` and provider validation |
-| Pixel-only renderer | Windows Ink renderer using the same Store; Pixel entry files preserved as reference but excluded from builds |
-| `rm -rf dist` | Build script removed from the Windows package; no recursive deletion API in package configuration |
+| Permanent cache/Trash deletion on Unix-like hosts | No deletion; recommendation estimates only |
+| Recycle Bin-only Windows cleanup | No cleanup; Recycle Bin reported as occupied storage |
+| Two-step deletion confirmation | No confirmation dialogs because no action is performed |
+| `fs.rm` / `fsp.rm` cleanup paths | Removed from active v1 modules |
+| `IFileOperation` bridge | Archived, unreachable, not published |
+| `--dry-run` | Rejected as a cleanup-implying option |
+| `rm -rf dist` | Build script removed from package configuration |
 
 ## CLI compatibility
 
-Preserved: interactive mode, `--demo`, `--dry-run`, `--plain`, `--json`, `--drives`, `--drive <value>`, `--drive=<value>`, help and exit-code handling. Windows help now describes Windows drives and terminals. Drive selectors accept native paths and volume metadata. JSON retains existing fields and adds optional `driveType`; unassigned-volume `mount` advice is no longer a UDisks command.
+Preserved safe options: interactive analysis, `--demo`, `--plain`, `--json`, `--drives`, `--drive`, help and exit-code handling. Cleanup-implying options are rejected before application modules load.
 
-No noninteractive cleanup command was added. Plain/JSON modes remain read-only.
+JSON retains the original analysis fields and adds a `mode` of `read-only-analysis-and-recommendations` plus `cleanup.automatedCleanupSupported: false`. Text output includes an explicit read-only notice.
 
-## Intentional behavior differences
+## Intentional compatibility differences
 
-- Every Windows cleanup is restorable through the Recycle Bin; there is no cache permanent-delete exception.
-- Recycle Bin usage cannot be emptied through this app.
-- Moving caches transfers estimated bytes to Recycle Bin accounting rather than reporting reclaimed space.
-- Logical rather than allocated file size is used.
-- Old modification time alone does not imply `unused` on Windows.
-- Windows Terminal uses character graphics and keyboard input; Pixel animation/mouse and Home/End are not reproduced.
-- Explorer reveal confirms process startup, not the subsequent Shell window's behavior.
+- No cleanup operation is available on any platform.
+- No successful cleanup count or freed-byte total is displayed.
+- Modification time is not presented as last-opened time.
+- Pixel graphics and mouse interactions are not reproduced by the Ink renderer.
+- macOS and Linux support in this repository is source-level only; the package targets Windows x64.
 
-## Risk review
+## Security summary
 
-Highest-risk boundaries are cleanup containment, reparse points, Shell failure semantics and changed files between planning and confirmation. The implementation uses repeated policy checks, exact prepared path arrays, structured JSON stdin, pre/post-delete destination evidence, per-item results and no fallback. Runtime behavior remains unverified and needs the separate matrix in `WINDOWS.md`.
+V1 has no active mutation backend. Static verification must confirm that no runtime path reaches deletion, recycling, moving, registry changes or cleanup commands. Runtime Windows validation remains outstanding.

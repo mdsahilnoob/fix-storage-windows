@@ -1,28 +1,23 @@
 # fix-storage-windows
 
-A native Windows port of [fix-storage](https://github.com/govijr/fix-storage), for inspecting disk usage and moving explicitly confirmed cleanup candidates to the **Windows Recycle Bin**.
+**READ-ONLY MODE — NO FILES WILL BE MODIFIED.**
 
-> **Development status:** the Windows implementation is present but has not been tested or verified. No tests, benchmarks, deletion experiments, or automated verification were run during this porting phase. **Do not use cleanup on real files yet.** See [WINDOWS.md](WINDOWS.md) for limitations and the outstanding validation matrix.
+`fix-storage-windows` v1 is a native Windows 10/11 storage analysis and cleanup recommendation tool. It measures disk usage, scans directories, classifies storage, identifies large files and caches, estimates potential cleanup opportunities, and presents recommendations. It **never** deletes, recycles, moves, renames, empties, or modifies files.
 
-## Safety model
+Cleanup recommendations are informational only. You decide whether to act on them yourself, outside this application.
 
-- The cleanup design routes every real Windows operation through the Windows Recycle Bin provider; this is source-level intent and still requires Windows runtime proof.
-- There is no permanent-delete option or fallback.
-- The app never empties the Recycle Bin.
-- Cleanup requires a second keypress after showing the exact paths, item count, estimated size, and destination.
-- `--dry-run` and `--demo` do not change filesystem contents.
-- Moved bytes and observed net free-space changes are reported separately; Recycle Bin moves are not treated as reclaimed space or attributed solely to this app.
-- Windows, installed-program locations, boot/recovery data, profile roots, volume roots, and Recycle Bin contents are protected.
-- Junctions and symbolic links are not traversed or accepted for cleanup.
+## Product scope
 
-Read [docs/windows-security.md](docs/windows-security.md) before working on cleanup code.
+- **Included:** drive discovery, volume information, disk-space reporting, directory scanning, file-size analysis, category classification, large-file identification, temporary and cache identification, possible duplicate candidates, protected-path recognition, permission-error reporting, scan progress, CLI reports, JSON output, plain-text output, terminal UI.
+- **Not included:** automated cleanup of any kind. There is no hidden cleanup mode and no activation flag.
 
 ## Requirements
 
 - Windows 10 or Windows 11, x64
 - Node.js 20.11 or newer, including npm
-- Windows PowerShell 5.1 (`powershell.exe`) for volume discovery and the STA C# Recycle Bin bridge; PowerShell 7 can be used to launch the CLI
-- Windows Terminal, PowerShell, PowerShell 7, or Windows Console for the character UI
+- Windows Terminal, PowerShell, PowerShell 7, or Windows Console
+
+The native Recycle Bin bridge from earlier development is archived source only. It is not reached by v1 runtime paths and is not included in the published package.
 
 ## Install from source (PowerShell)
 
@@ -33,8 +28,6 @@ npm run build
 node bin/fix-storage.cjs --demo
 ```
 
-The original Pixel-specific UI entry files are preserved for reference but excluded from Windows builds because Pixel 0.3.1 has no Windows runtime. Windows uses the Ink character renderer instead, so no unsupported Pixel postinstall or native binary is needed.
-
 To link the `fix-storage` command into npm's user-level global directory:
 
 ```powershell
@@ -42,13 +35,12 @@ npm install --global .
 fix-storage --help
 ```
 
-No administrator PowerShell is required or recommended. Protected files that cannot be read or recycled are reported and left alone.
+No administrator PowerShell is required or recommended.
 
 ## Usage
 
 ```powershell
-fix-storage                    # interactive drive scan
-fix-storage --dry-run          # interactive; no filesystem changes
+fix-storage                    # interactive read-only analysis
 fix-storage --demo             # synthetic data; reads and changes nothing
 fix-storage --plain            # text storage report
 fix-storage --json             # JSON storage report
@@ -59,7 +51,9 @@ fix-storage --drive 2          # select the second reported drive
 fix-storage --plain --drive "D:\Games"
 ```
 
-Drive selectors are a one-based number, displayed name, volume label, mount point, volume GUID, or an absolute path on the volume. `--dry-run` is an interactive cleanup preview; `--plain`, `--json`, and `--drives` never perform cleanup regardless of mode.
+Cleanup-related options such as `--clean`, `--delete`, `--recycle`, `--apply`, `--execute`, and `--dry-run` are rejected with an explanation. They are never passed to any native backend.
+
+Drive selectors accept a one-based number, displayed name, volume label, mount point, volume GUID, or an absolute path on the volume.
 
 ### Interactive keys
 
@@ -72,21 +66,30 @@ Drive selectors are a one-based number, displayed name, volume label, mount poin
 | PageUp/PageDown | Move ten rows |
 | `g` | Jump to the dominant storage culprit |
 | `f` | Show only junk/unused, or show everything |
+| `c` | Show an informational recommendation |
 | `o`/Space | Open a folder or reveal a file in Explorer |
-| `d`/Delete/Backspace | Select an item; press again to confirm Recycle Bin move |
-| `c` | Prepare eligible cache cleanup; press again after reviewing exact paths |
 | `v`/`V` | Next/previous drive |
 | `1`–`9` | Select a drive |
-| `r` | Rescan |
+| `r` | Refresh analysis |
 | `q`/Ctrl+C | Quit |
 
-The Windows Ink renderer does not implement the original pixel meter, mouse actions, or Home/End shortcuts. Navigation, reports, culprit browsing, Explorer integration, dry-run, and confirmation workflows are retained in character form.
+No key triggers filesystem modification.
 
 ## Reports and accounting
 
-The JSON schema preserves the original categories and fields. Windows drive objects additionally expose `driveType` when available. Category values are estimates based on logical file sizes, not NTFS allocated-cluster totals. Independently measured categories can exceed filesystem usage; unmeasured and unreadable space is assigned to System data.
+Category values are estimates based on logical file sizes, not allocated-cluster totals. Independent category estimates can exceed filesystem usage; unmeasured and unreadable space is assigned to System data.
 
-Windows access timestamps are not treated as last-opened dates. The interface displays **modified** time and does not recommend deletion solely because a file has an old timestamp.
+Reports use read-only terminology:
+
+- potentially recoverable space
+- estimated cleanup opportunity
+- estimated category size
+- recommended review
+- storage currently occupied
+
+No report displays actual freed space or a successful cleanup count.
+
+Windows access timestamps are not treated as last-opened dates. The interface displays modification time and never recommends deletion solely because a file has an old timestamp.
 
 ## Documentation
 

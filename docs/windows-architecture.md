@@ -1,79 +1,72 @@
 # Windows architecture
 
-## Preservation strategy
+## v1 scope
 
-The port retains the original category model, `Drive`/`Layout`/`ScanSnapshot` data structures, `Store` workflows, plain/JSON presentation, demo model, classification concepts, and Unix/macOS reference implementations. Windows behavior is selected through centralized `process.platform` constants in `src/core/platform.ts`; the original repository is not changed.
+fix-storage-windows v1 is a **read-only analysis and recommendation** application. It does not contain an active cleanup workflow. The native Recycle Bin bridge from earlier development is archived source only, is not imported by runtime code, and is excluded from the published package.
 
-The Windows package intentionally targets `win32`/`x64`. macOS and Linux support remains in the untouched original project, while its source is preserved here as a compatibility reference.
+The port retains the original category model, `Drive`/`Layout`/`ScanSnapshot` structures, plain/JSON presentation, demo model, classification concepts, and Unix/macOS reference implementations. Windows behavior is selected through `src/core/platform.ts`. The original repository is not changed.
 
 ## Backend map
 
-| Area | Shared entry point | Native backend |
+| Area | Shared entry point | Native/Windows backend |
 | --- | --- | --- |
-| Platform | `src/core/platform.ts` | `IS_WINDOWS`, Windows UI labels |
-| Paths | callers use platform-aware comparisons | `src/core/windows/paths.ts` |
-| Volumes | `src/core/drives.ts` | `windows/drives.ts`, `windows/powershell.ts` |
-| Layout | `src/core/layout.ts` | `windows/layout.ts` |
-| Measurement | `src/core/scan.ts` and `core/browse.ts` | `windows/scan.ts` |
+| Platform | `src/core/platform.ts` | Windows labels and feature flags |
+| Paths | callers use platform-aware comparisons | `windows/paths.ts` |
+| Volumes | `core/drives.ts` | `windows/drives.ts`, `windows/powershell.ts` |
+| Layout | `core/layout.ts` | `windows/layout.ts` |
+| Measurement | `core/scan.ts`, `core/browse.ts` | `windows/scan.ts` |
 | Metadata | `usage()` | `windows/metadata.ts` |
-| Removal policy | `cannotRemove()` and `clean()` | `windows/permissions.ts` |
-| Recycle Bin | `moveToTrash()` and `clean()` | `windows/trash.ts`, `scripts/windows-recycle-bin.ps1`, `scripts/RecycleBin.Native.cs` |
-| Explorer | `reveal()` | `windows/reveal.ts` |
-| Terminal | `bin/fix-storage.cjs` | `src/main-windows.tsx`, `src/ui/windows-app.tsx` |
+| Review policy | `reviewRestriction()` and `core/clean.ts` | `windows/permissions.ts`, `windows/paths.ts` |
+| Recommendations | `core/recommendations.ts` | in-memory, read-only |
+| Explorer reveal | `reveal()` | `windows/reveal.ts` |
+| Terminal | `bin/fix-storage.cjs` | `main-windows.tsx`, `ui/windows-app.tsx` |
+
+Archived, unreachable files: `scripts/windows-recycle-bin.ps1`, `scripts/RecycleBin.Native.cs`, `core/windows/trash.ts` contains only descriptive helpers.
 
 ## Volume flow
 
-`listDrives()` delegates on Windows to one CIM query. `Win32_Volume` supplies identity, label, filesystem, capacity, free space, drive type and access state; `Win32_MountPoint` adds folder mount points. The backend converts these to the established `Drive` and `Mount` records. Volume identity remains distinct from `DriveKind`: a native Windows system disk is `main`, not the foreign-Windows `windows` kind used by Linux dual-boot inspection.
+`listDrives()` delegates on Windows to CIM. `Win32_Volume` supplies identity, label, filesystem, capacity, free space, drive type and access state; `Win32_MountPoint` adds folder mount points. Volume identity remains distinct from `DriveKind`: a native Windows system disk is `main`, not the foreign-Windows `windows` kind used by Linux dual-boot inspection.
 
-`diskSpace()` uses `statfs` on the selected mount and the Windows `total - available` formula. CIM space values are a fallback. Boot volumes are look-only. `pickDrive()` delegates to case-insensitive Windows selection instead of reading `/proc`.
+`diskSpace()` uses `statfs` on the selected mount with the Windows `total - available` formula. CIM values are a fallback. Boot volumes are look-only. `pickDrive()` uses case-insensitive Windows selection.
 
 ## Layout and nested roots
 
-`windowsLayout()` builds roots only on volumes that contain them. The home volume receives standard user folders, AppData, explicitly named caches, package-manager stores, developer tools and game locations. A non-system data volume has a general root plus more specific media/game roots. Nested-root expansion in `startScan()` excludes exact nested roots before measuring a parent, preventing ordinary double counting.
+`windowsLayout()` builds roots only on volumes that contain them. The home volume receives standard user folders, AppData, explicitly named caches, package-manager stores, developer tools and game locations. A non-system data volume has a general root plus more specific media/game roots. Nested-root expansion excludes exact nested roots before measuring a parent.
 
-Only known cache roots are `caches`; AppData, Packages, Docker, package stores, game installations and persistent application state remain separate review/system content. `$Recycle.Bin` is visible for accounting but is not a cleanup target.
+Only known cache roots are `caches`; AppData, Packages, Docker, package stores, game installations and persistent application state remain separate review/system content. `$Recycle.Bin` is visible for accounting only.
 
 ## Measurement flow
 
-`du()` keeps its original signature for Unix and delegates to `windowsDu()` on Windows. This lets initial scans, folder browsing and category remeasurement share one policy. The Windows walker:
+`du()` keeps its Unix signature and delegates to `windowsDu()` on Windows. The Windows walker:
 
 1. Uses `lstat` to inspect the object itself.
 2. Does not recurse through symbolic-link/junction directories.
-3. Uses extended-length paths for filesystem operations while retaining ordinary display paths.
-4. Batches entries and bounds active filesystem operations with `IoLimiter`.
-5. Accumulates logical sizes and permission-denied state independently per path.
+3. Uses extended-length paths for filesystem operations.
+4. Batches entries and bounds active I/O with `IoLimiter`.
+5. Accumulates logical sizes and permission-denied state.
 6. Observes cancellation between batches.
 
-Culprit discovery performs a depth-limited walk and retains only dominant branches plus the largest direct children. Metadata uses `mtimeMs` with `Usage.kind = "changed"`; no access-time guess is labelled as last-opened.
+Culprit discovery performs a depth-limited walk and retains only dominant branches plus the largest direct children. Metadata uses `mtimeMs` with `Usage.kind = "changed"`; access time is not treated as last-opened.
 
-## Cleanup flow
-
-Single-item path:
+## Recommendation flow
 
 ```text
-Ink input -> Store.removeItem -> cannotRemoveWindows -> second confirmation
-  -> moveToTrash -> recycleWindows -> validateWindowsRecycle
-  -> windowsTrash.moveToTrash -> fixed C# IFileOperation bridge -> pre/post recycle-only guards
+Ink/CLI input -> Store.rescan -> startScan/listFolder/findCulprit
+  -> classify + sizes -> reviewItem/reviewCategory
+  -> Recommendation { paths, reason, estimatedBytes }
+  -> UI note / JSON / plain text
 ```
 
-Category path:
+`plan()` in `core/clean.ts` only reads direct children and reuses scan sizes. `recommendationForItem()` and `duplicateCandidates()` produce in-memory informational results. Duplicate candidates use name and byte size only; file contents are never read.
 
-```text
-Ink input -> Store.press -> plan -> exact paths/count/bytes displayed
-  -> second confirmation -> cleanWindows -> containment + cannotRemoveWindows
-  -> recycleWindows -> one structured batch -> per-item result reconciliation
-```
-
-`windowsTrash` is private and reached only through `recycleWindows`. Paths are sent as UTF-8 JSON to a fixed STA PowerShell process, which compiles the bundled C# bridge in memory. Before queuing a delete, `GetVolumePathNameW` is mandatory; the mount must resolve to a brace-delimited volume GUID; uncertain volume types are rejected; `SHQueryRecycleBinW` must confirm a bin; per-volume `NukeOnDelete`, global `NoRecycleFiles`, and legacy BitBucket settings must be verified or absent by default. Native file handles reject reparse attributes on the item and every ancestor except the exact resolved volume mount point, and record the volume serial/file index; the Shell item's path, ancestors and file identity must match again immediately before scheduling. The managed sink interface omits `[ComImport]`, declares LPWStr callback strings, and is passed to `DeleteItem` through an `IFileOperationProgressSink`-typed parameter. Native results are processed in bounded batches with strict duplicate/missing/contradictory-result checks, configurable timeout and cancellation, and an explicit unknown outcome. It then uses `IFileOperation` with `FOFX_RECYCLEONDELETE`, `FOFX_ADDUNDORECORD`, no confirmation UI and early failure. Success requires pre/post/finish callbacks, exactly one delete callback, a successful HRESULT, recycle flags, non-null `psiNewlyCreated`, no aborted operations, and source-path removal. `PostDeleteItem` is confirmation, not rollback; identity and policy checks narrow, but do not make atomic, the validation-to-operation race.
-
-Windows `deletesForGood()` always returns false, direct permanent deletion throws on Windows, Recycle Bin paths are protected, and `Store.canClear("trash")` is false. Recycled cache bytes transfer to the Recycle Bin estimate rather than being reported as reclaimed disk space.
+No path in this flow imports or calls a mutation provider.
 
 ## Windows renderer
 
-Pixel 0.3.1 has no Windows native package and its postinstall rejects Windows. The launcher therefore loads `main-windows.js` instead of Pixel. That entry dynamically imports ESM-only Ink 5 while leaving the rest of the package CommonJS. `createWindowsApp()` receives Ink components and uses the existing `Store` through `useSyncExternalStore`.
+Pixel 0.3.1 has no Windows runtime. The launcher loads `main-windows.js`, which dynamically imports ESM Ink while the package remains CommonJS. `createWindowsApp()` receives Ink components and uses `Store` through `useSyncExternalStore`.
 
-The character UI retains drive/category/folder navigation, reports, culprit details, Explorer reveal, cleanup plans, dry-run and errors. Pixel graphics and mouse behavior are renderer-specific features not reproduced.
+The UI provides drive/category/folder navigation, culprit details, filtering, Explorer reveal, read-only recommendations and errors. Pixel graphics and mouse behavior are not reproduced.
 
 ## Packaging
 
-Ink and React are runtime dependencies. The two Pixel-specific reference entry files are preserved but excluded from Windows compilation, so Pixel and its unsupported postinstall are not package dependencies. The C# source and fixed PowerShell bridge are included in the npm package and compiled in memory by Windows at cleanup time; no native compiler or trash npm package is required.
+Ink and React are runtime dependencies. Pixel reference entry files are excluded from Windows compilation. The archived native bridge is not included in the published package. No native compiler or trash package is required for v1.

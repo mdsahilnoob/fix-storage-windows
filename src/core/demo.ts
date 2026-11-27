@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { CATEGORIES, type CategoryId } from "./categories";
-import type { Clearable } from "./clean";
+import type { Reviewable } from "./clean";
 import { MAC_DRIVE, type Drive, type DriveKind } from "./drives";
 import { LOOK_ONLY, type Layout } from "./layout";
 import { IS_MAC, IS_WINDOWS } from "./platform";
@@ -197,10 +197,10 @@ function split(total: number, paths: string[]): Item[] {
   return paths.map((path, i) => ({ path, size: (total * weights[i]) / sum, dir: !/\.(zip|mov|mkv|dmg|pkg|iso|sys)$/i.test(path) && !/\/swapfile$/.test(path) }));
 }
 
-export function demoPlan(category: Clearable, layout: Layout): Item[] {
+export function demoPlan(category: Reviewable, layout: Layout): Item[] {
   const { sizes, paths } = disk(layout);
   const items = split(sizes[category], paths[category]);
-  // Many small steps so the clearing animation has something to show.
+  // Synthetic direct children for read-only recommendation planning.
   return items.flatMap((item) =>
     Array.from({ length: 6 }, (_, i) => ({ path: i === 0 ? item.path : `${item.path}/${i}`, size: item.size / 6 })),
   );

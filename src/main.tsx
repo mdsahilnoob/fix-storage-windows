@@ -5,7 +5,7 @@ import { Store } from "./ui/store";
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);
-const store = new Store({ demo: args.has("--demo"), dryRun: args.has("--dry-run"), drive: driveArg(argv) });
+const store = new Store({ demo: args.has("--demo"), drive: driveArg(argv) });
 
 const quit = () => {
   store.stop();
@@ -27,13 +27,11 @@ function sidebarKey(key: string): boolean {
     case "enter":
     case "tab":
       return store.setPane("list"), true;
-    case "c":
-      if (store.canClear(selected)) store.press(selected);
-      else {
-        const id = store.suggestion();
-        if (id) store.press(id);
-      }
+    case "c": {
+      const id = store.suggestion();
+      if (id) void store.reviewCategory(id);
       return true;
+    }
   }
   return false;
 }
@@ -71,12 +69,9 @@ function listKey(key: string): boolean {
     case "o":
     case "space":
       return void store.reveal(), true;
-    case "backspace":
-    case "delete":
-    case "d":
-      return store.removeItem(), true;
     case "c":
-      if (store.get().stack.length === 0 && store.canClear(selected)) store.press(selected);
+      if (store.get().stack.length === 0 && store.canReview(selected)) void store.reviewCategory(selected);
+      else store.reviewItem();
       return true;
   }
   return false;

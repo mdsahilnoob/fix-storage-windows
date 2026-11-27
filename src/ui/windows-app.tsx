@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import { CATEGORIES, CATEGORY, TIER_LABEL, type CategoryId, type Rgb } from "../core/categories";
 import { shortAge } from "../core/classify";
 import { capacity, gb, size, tilde } from "../core/format";
-import { TRASH_NAME } from "../core/platform";
+import type { Recommendation } from "../core/recommendations";
 import type { Item } from "../core/scan";
 import { diskSegments } from "./bar";
 import type { Store } from "./store";
@@ -15,7 +15,7 @@ export type InkModule = typeof import("ink", { with: { "resolution-mode": "impor
 const rgb = (color: Rgb) => `#${color.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 const pct = (part: number, whole: number) => `${whole > 0 ? Math.round((part / whole) * 100) : 0}%`;
 
-/** A native cell renderer for Windows, backed by the original application store. */
+/** Read-only Ink renderer backed by the analysis store. */
 export function createWindowsApp(ink: InkModule) {
   const { Box, Text, useInput } = ink;
 
@@ -40,6 +40,8 @@ export function createWindowsApp(ink: InkModule) {
     );
   }
 
+  const TIER_COLOR: Record<string, string> = { safe: "green", review: "yellow", keep: "gray" };
+
   function CategoryList({ store }: { store: Store }) {
     const state = store.get();
     return (
@@ -58,14 +60,12 @@ export function createWindowsApp(ink: InkModule) {
         })}
         <Box marginTop={1} flexDirection="column">
           <Text color={TIER_COLOR[CATEGORY[state.selected].tier]}>{TIER_LABEL[CATEGORY[state.selected].tier]}</Text>
-          {store.canClear("caches") ? <Text color="green">c  prepare cache cleanup</Text> : null}
-          <Text dimColor>Recycle Bin is never emptied</Text>
+          <Text color="green">c  review recommendation</Text>
+          <Text dimColor>no files will be modified</Text>
         </Box>
       </Box>
     );
   }
-
-  const TIER_COLOR: Record<string, string> = { safe: "green", review: "yellow", keep: "gray" };
 
   function ItemRow({ store, item, index }: { store: Store; item: Item; index: number }) {
     const state = store.get();
@@ -92,21 +92,16 @@ export function createWindowsApp(ink: InkModule) {
     );
   }
 
-  function Confirmation({ store }: { store: Store }) {
-    const confirm = store.get().confirm;
-    if (!confirm) return null;
-    const paths = confirm.paths ?? [confirm.kind === "item" ? confirm.path : ""];
-    const bytes = confirm.bytes ?? 0;
+  function RecommendationPanel({ recommendation }: { recommendation: Recommendation | null }) {
+    if (!recommendation) return null;
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
-        <Text color="yellow" bold>Confirm {TRASH_NAME} move</Text>
-        <Text>{paths.length} selected {paths.length === 1 ? "item" : "items"} · estimated {size(bytes)}</Text>
-        <Text color={store.pretend ? "cyan" : "yellow"}>
-          {store.pretend ? "DRY RUN: filesystem contents will not change." : `Items will be moved to the ${TRASH_NAME}; they can be restored there.`}
-        </Text>
-        <Text bold>Exact selected paths:</Text>
-        {paths.map((path) => <Text key={path}>  {path}</Text>) }
-        <Text color="yellow" bold>{confirm.kind === "item" ? "Press d/Delete again" : "Press c again"} within 15 seconds to confirm. Any navigation cancels.</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1} marginTop={1}>
+        <Text color="green" bold>{recommendation.title}</Text>
+        <Text>{size(recommendation.estimatedBytes)} estimated cleanup opportunity · {CATEGORY[recommendation.category].name}</Text>
+        <Text wrap="truncate">{recommendation.reason}</Text>
+        <Text dimColor>Informational only. Review these paths yourself outside the application.</Text>
+        {recommendation.paths.slice(0, 4).map((path) => <Text key={path} wrap="truncate">  {path}</Text>)}
+        {recommendation.paths.length > 4 ? <Text dimColor>  … and {recommendation.paths.length - 4} more</Text> : null}
       </Box>
     );
   }
@@ -125,21 +120,18 @@ export function createWindowsApp(ink: InkModule) {
         if (index < state.drives.length) store.setDrive(index);
         return;
       }
-
+      if (input === "c") {
+        if (state.pane === "list" && state.stack.length === 0) return store.reviewItem();
+        const suggestion = store.suggestion();
+        if (suggestion) return void store.reviewCategory(suggestion);
+        return;
+      }
       if (state.pane === "sidebar") {
         if (key.upArrow || input === "k") return store.moveCategory(-1);
         if (key.downArrow || input === "j") return store.moveCategory(1);
         if (key.rightArrow || key.return || key.tab || input === "l") return store.setPane("list");
-        if (input === "c") {
-          if (store.canClear(state.selected)) store.press(state.selected);
-          else {
-            const suggestion = store.suggestion();
-            if (suggestion) store.press(suggestion);
-          }
-        }
         return;
       }
-
       if (key.upArrow || input === "k") return store.moveRow(-1);
       if (key.downArrow || input === "j") return store.moveRow(1);
       if (key.pageUp) return store.moveRow(-10);
@@ -149,8 +141,6 @@ export function createWindowsApp(ink: InkModule) {
       if (key.tab) return store.setPane("sidebar");
       if (input === "g") return store.goToCulprit();
       if (input === "o" || input === " ") return void store.reveal();
-      if (key.backspace || key.delete || input === "d") return store.removeItem();
-      if (input === "c" && state.stack.length === 0 && store.canClear(state.selected)) return store.press(state.selected);
     });
 
     const entries = store.entries();
@@ -159,19 +149,18 @@ export function createWindowsApp(ink: InkModule) {
     const visible = entries.slice(start, start + visibleCount);
     const selected = entries[state.row];
     const drive = state.drives[state.drive];
-    const blocked = selected ? store.blocked(selected) : null;
-    const confirm = state.confirm;
-    const paths = confirm?.paths ?? [];
+    const limit = selected ? store.reviewLimit(selected) : null;
 
     return (
       <Box flexDirection="column" paddingX={1} paddingY={0}>
         <Box justifyContent="space-between">
-          <Text bold>fix-storage <Text color="cyan">Windows</Text>{store.options.demo ? " · demo" : store.options.dryRun ? " · dry run" : ""}</Text>
-          <Text dimColor>{state.scan.phase === "scanning" ? `measuring ${tilde(state.scan.current)}` : "scan complete"}</Text>
+          <Text bold>fix-storage <Text color="cyan">Windows</Text>{store.options.demo ? " · demo" : ""}</Text>
+          <Text color="yellow" bold>READ-ONLY MODE — NO FILES WILL BE MODIFIED</Text>
         </Box>
+        <Text dimColor>{state.scan.phase === "scanning" ? `measuring ${tilde(state.scan.current)}` : "analysis complete"}</Text>
         <Text color="cyan" wrap="truncate">{state.drives.map((item, index) => `${index === state.drive ? "[" : ""}${index + 1}:${item.name}${index === state.drive ? "]" : ""}`).join("  ")}</Text>
         <Text>{gb(state.scan.used)} used of {capacity(state.scan.total)} · {gb(state.scan.available)} free · {pct(state.scan.used, state.scan.total)} full</Text>
-        <Text dimColor>{`session: net free-space increase ${gb(state.freed)} observed · ${gb(state.movedToRecycleBinBytes)} moved to ${TRASH_NAME} (not reclaimed)`}</Text>
+        <Text dimColor>{`estimated category sizes: ${gb(state.scan.measured)} measured · ${size(state.reclaimable().junk + state.reclaimable().unused)} potentially recoverable`}</Text>
         {drive ? <Text dimColor wrap="truncate">{[drive.fstype, drive.driveType, drive.label, drive.mount, drive.readOnly ? "read-only" : ""].filter(Boolean).join(" · ")}</Text> : null}
         <Meter store={store} />
         <Box flexGrow={1} marginTop={1}>
@@ -184,20 +173,18 @@ export function createWindowsApp(ink: InkModule) {
             {visible.map((item, offset) => <ItemRow key={item.path} store={store} item={item} index={start + offset} />)}
             {entries.length === 0 ? <Text dimColor>{state.scan.phase === "scanning" ? "still measuring…" : "nothing here"}</Text> : null}
             {entries.length > visibleCount ? <Text dimColor>showing {start + 1}–{Math.min(entries.length, start + visibleCount)} of {entries.length}; selection scrolls with ↑/↓</Text> : null}
-            {selected && !confirm ? (
+            {selected ? (
               <Box marginTop={1} flexDirection="column">
-                <Text color={blocked ? "gray" : "yellow"}>{blocked ?? `d/Delete: select 1 item · ${size(selected.size)} · ${TRASH_NAME}`}</Text>
-                <Text dimColor>Enter: open · g: culprit · o/Space: Explorer · d: recycle · c: cache cleanup · Tab: panes</Text>
+                <Text color={limit ? "gray" : "green"}>{limit ?? `c: review ${basename(selected.path)} · ${size(selected.size)} estimated opportunity`}</Text>
+                <Text dimColor>Enter: open · g: culprit · o/Space: Explorer · c: recommendation · Tab: panes</Text>
               </Box>
             ) : null}
           </Box>
         </Box>
-        <Confirmation store={store} />
-        {state.action ? <Text color="yellow">moving to {TRASH_NAME}: {tilde(state.action.current)}</Text> : null}
-        {state.removing ? <Text color="yellow">moving {tilde(state.removing)} to {TRASH_NAME}…</Text> : null}
+        <RecommendationPanel recommendation={state.recommendation} />
+        {state.action ? <Text color="yellow">analyzing {CATEGORY[state.action.id].name}: {tilde(state.action.current)}</Text> : null}
         {state.note ? <Text color="cyan">{state.note}</Text> : null}
-        <Text dimColor>↑↓/j/k move · Enter open · ←/Esc back · f filter · v/1–9 drives · r rescan · q quit</Text>
-        {confirm && paths.length > 0 ? <Text dimColor>Confirmation lists all {paths.length} exact paths above.</Text> : null}
+        <Text dimColor>↑↓/j/k move · Enter open · ←/Esc back · f filter · c recommendation · v/1–9 drives · r rescan · q quit</Text>
       </Box>
     );
   }

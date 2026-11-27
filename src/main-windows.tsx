@@ -10,7 +10,7 @@ const importModule = new Function("specifier", "return import(specifier)") as (s
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const args = new Set(argv);
-  const store = new Store({ demo: args.has("--demo"), dryRun: args.has("--dry-run"), drive: driveArg(argv) });
+  const store = new Store({ demo: args.has("--demo"), drive: driveArg(argv) });
   const ink = await importModule("ink");
   const App = createWindowsApp(ink);
   const view = ink.render(createElement(App, { store, onQuit: () => view.unmount() }), { exitOnCtrlC: false });

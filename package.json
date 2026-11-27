@@ -27,7 +27,6 @@
   "files": [
     "bin",
     "dist",
-    "scripts",
     "README.md",
     "WINDOWS.md",
     "docs",
