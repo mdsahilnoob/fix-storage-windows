@@ -20,7 +20,7 @@ fix-storage v1 is **READ-ONLY**. It analyzes storage, estimates potential cleanu
 - Recommendations with reasons and measured storage estimates; these are not recovery amounts.
 - Explicit scan states: scanning, completed, cancelled and failed.
 - JSON and plain-text reports, including partial-analysis status and unmeasured bytes.
-- Ink terminal UI with drive selection, browsing, filtering and refresh.
+- Responsive Ink terminal UI with a heatmap meter, category heat dots, fixed-viewport scrolling, drive selection, browsing, filtering and refresh.
 - Explorer reveal for selected paths.
 
 ## Explicitly not implemented in v1
