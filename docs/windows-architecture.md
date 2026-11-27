@@ -53,11 +53,11 @@ Culprit discovery performs a depth-limited walk and retains only dominant branch
 ```text
 Ink/CLI input -> Store.rescan -> startScan/listFolder/findCulprit
   -> classify + sizes -> reviewItem/reviewCategory
-  -> Recommendation { paths, reason, estimatedBytes }
+  -> Recommendation { paths, reason, estimatedBytes, duplicateGroups }
   -> UI note / JSON / plain text
 ```
 
-`plan()` in `core/clean.ts` only reads direct children and reuses scan sizes. `recommendationForItem()` and `duplicateCandidates()` produce in-memory informational results. Duplicate candidates use name and byte size only; file contents are never read.
+`recommendationForItem()` builds item-level recommendations for the selected category. `categoryRecommendation()` builds category-level recommendations only for Apps, Developer, Documents, Caches and Trash; any other category is refused instead of being mapped to Caches. `duplicateCandidates()` groups same-name, same-size files as possible duplicates using in-memory scan data. File contents are never read, hashed or compared.
 
 No path in this flow imports or calls a mutation provider.
 

@@ -14,10 +14,16 @@
     "cache",
     "tui",
     "terminal",
-    "cli",
-    "node_modules"
+    "cli"
   ],
-  "homepage": "https://github.com/govijr/fix-storage#readme",
+  "homepage": "https://github.com/mdsahilnoob/fix-storage-windows#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mdsahilnoob/fix-storage-windows.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mdsahilnoob/fix-storage-windows/issues"
+  },
   "license": "MIT",
   "author": "the fix-storage authors",
   "main": "dist/main-windows.js",
@@ -39,6 +45,7 @@
     "demo": "tsc -p tsconfig.json && node bin/fix-storage.cjs --demo",
     "plain": "tsc -p tsconfig.json && node bin/fix-storage.cjs --plain",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "prepack": "npm run build"
   },
   "dependencies": {

@@ -7,6 +7,7 @@ import type { Culprit } from "../core/browse";
 import { classify, shortAge, type Verdict } from "../core/classify";
 import { capacity, gb, size, tilde } from "../core/format";
 import { IS_MAC, IS_WINDOWS, REVEAL_LABEL } from "../core/platform";
+import { REVIEW_CATEGORIES, type ReviewCategory } from "../core/recommendations";
 import type { Item } from "../core/scan";
 import { BAR_ROWS, BarCanvas, HEADROOM_ROWS, diskSegments, type BarModel } from "./bar";
 import { MAX_ROWS, type AppState, type Store } from "./store";
@@ -37,10 +38,13 @@ const ch = (fs: number, n: number) => fs * 0.6 * n;
 /** macOS puts a narrow no-break space before AM/PM in screenshot names; many fonts draw it as a box. */
 const cleanName = (name: string) => name.replace(/[\u202f\u00a0]/g, " ");
 
-const REVIEW_LABELS = {
+const REVIEW_LABELS: Record<ReviewCategory, string> = {
+  apps: "review apps",
+  developer: "review developer",
+  documents: "review documents",
   caches: "review caches",
   trash: "check Recycle Bin usage",
-} as const;
+};
 
 const pct = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "0%");
 const rgba = (c: Rgb, a: number): Color => [c[0], c[1], c[2], Math.round(Math.max(0, Math.min(1, a)) * 255)] as unknown as Color;
@@ -358,8 +362,8 @@ function QuickWins({ state, store, fs }: Ctx) {
     );
   }
   if (state.scan.phase !== "done") return <T fs={fs} color={FAINT}>looking for storage opportunities…</T>;
-  const ids = (["caches", "trash"] as const).filter((id) => store.canReview(id) || state.action?.id === id);
-  if (ids.length === 0) return <T fs={fs} color={FAINT}>no prominent cache or Trash opportunities</T>;
+  const ids = REVIEW_CATEGORIES.filter((id) => store.canReview(id) || state.action?.id === id);
+  if (ids.length === 0) return <T fs={fs} color={FAINT}>no prominent recommendation opportunities</T>;
   const total = ids.reduce((sum, id) => sum + state.scan.sizes[id], 0);
   const busy = state.action !== null;
   return (
@@ -450,7 +454,7 @@ function InsideHeader(ctx: Ctx) {
           {top ? tilde(top.path) : category.blurb}
         </T>
         {reviewable ? (
-          <Hint fs={fs} k="c" label={REVIEW_LABELS[category.id as "caches" | "trash"]} keyColor={GREEN} onClick={() => void store.reviewCategory(category.id as "caches" | "trash")} />
+          <Hint fs={fs} k="c" label={REVIEW_LABELS[category.id as ReviewCategory]} keyColor={GREEN} onClick={() => void store.reviewCategory(category.id)} />
         ) : null}
       </Box>
       <Reclaimable {...ctx} />
@@ -733,6 +737,22 @@ export function App({ root, store }: { root: Root; store: Store }) {
           <T fs={fs} color={GREEN} bold>{state.recommendation.title}</T>
           <T fs={fs} color={MUTED} wrap>{`${size(state.recommendation.estimatedBytes)} estimated cleanup opportunity · ${state.recommendation.reason}`}</T>
           <T fs={fs} color={FAINT}>Informational only. Review these paths yourself outside the application.</T>
+          {state.recommendation.duplicateGroups?.length ? (
+            <Box style={{ flexDirection: "column" }}>
+              <T fs={fs} color={MUTED} bold>Possible duplicate groups (contents not compared)</T>
+              {state.recommendation.duplicateGroups.slice(0, 3).map((group) => (
+                <Box key={group.id} style={{ flexDirection: "column" }}>
+                  <T fs={fs} color={MUTED} wrap>
+                    {`${group.count} × ${group.name} · ${size(group.size)} each · ${size(group.estimatedConditionalBytes)} conditional saving if contents match`}
+                  </T>
+                  <T fs={fs} color={FAINT} wrap>
+                    {`${group.paths.slice(0, 3).join("  ")}${group.paths.length > 3 ? `  … and ${group.paths.length - 3} more paths` : ""}`}
+                  </T>
+                </Box>
+              ))}
+              <T fs={fs} color={FAINT} wrap>{state.recommendation.duplicateGroups?.[0]?.warning ?? ""}</T>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
       {state.action ? <T fs={fs} color={AMBER}>{`analyzing ${CATEGORY[state.action.id].name}: ${tilde(state.action.current)}`}</T> : null}

@@ -12,7 +12,7 @@ The original nine-category model and display order are retained. Categories desc
 | Music | Keep | Personal audio storage | Reported as occupied storage; no cleanup recommendation. |
 | System data | Keep | Windows, recovery, system files, unreadable data | Never offered for review. |
 | Caches | Potential savings | Explicitly named rebuildable caches | Reviewable; estimated opportunity only. |
-| Trash / Recycle Bin | Keep | Items already deleted | Reported as occupied storage. The app never empties or modifies it. |
+| Trash / Recycle Bin | Keep | Items already deleted | Reviewable as informational storage only. The app never empties or modifies it. |
 
 ## Temporary files
 

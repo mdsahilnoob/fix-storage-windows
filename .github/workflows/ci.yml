@@ -26,18 +26,63 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run build
-      - name: Smoke test read-only CLI modes
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Unit tests
+        run: bun test
+      - name: Read-only CLI smoke tests
         shell: pwsh
         run: |
-          node bin/fix-storage.cjs --help
-          node bin/fix-storage.cjs --demo --plain
-          node bin/fix-storage.cjs --demo --json | node -e 'JSON.parse(require("fs").readFileSync(0, "utf8"))'
-      - name: Package contents
-        run: npm pack --dry-run
-
-# The inherited Bun tests exercise Unix/POSIX behavior and permanent-delete
-# dry-run expectations. Windows-specific tests must be added in the separately
-# approved test phase before a test job is enabled here.
+          $help = node bin/fix-storage.cjs --help | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "help failed with $LASTEXITCODE" }
+          if ($help -notmatch 'READ-ONLY') { throw "help is missing the read-only notice" }
+          $plain = node bin/fix-storage.cjs --demo --plain | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "plain demo failed with $LASTEXITCODE" }
+          if ($plain -notmatch 'READ-ONLY MODE') { throw "plain demo is missing the read-only notice" }
+          node bin/fix-storage.cjs --demo --json | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8')); if (j.cleanup?.automatedCleanupSupported !== false || j.cleanup?.estimatesOnly !== true || j.cleanup?.categoryEstimatesMayOverlap !== true) process.exit(1)"
+          if ($LASTEXITCODE -ne 0) { throw "JSON demo failed with $LASTEXITCODE" }
+      - name: Cleanup flags are rejected
+        shell: pwsh
+        run: |
+          node -e "
+            const { spawnSync } = require('node:child_process');
+            const cases = [
+              ['--clean'], ['--delete'], ['--remove'], ['--recycle'],
+              ['--apply'], ['--execute'], ['--dry-run'], ['--empty-trash'],
+              ['--help', '--delete'], ['--json', '--clean'],
+              ['--drive', 'C:', '--remove'], ['--clean=value'],
+            ];
+            for (const args of cases) {
+              const run = spawnSync(process.execPath, ['bin/fix-storage.cjs', ...args], { encoding: 'utf8' });
+              if (run.status !== 2 || !String(run.stderr).includes('automated cleanup is not supported in v1')) {
+                console.error('cleanup flag was not rejected:', args.join(' '), run.status);
+                process.exit(1);
+              }
+            }
+          "
+          if ($LASTEXITCODE -ne 0) { throw "cleanup rejection check failed with $LASTEXITCODE" }
+      - name: Compiled output has no cleanup or mutation paths
+        shell: pwsh
+        run: |
+          $patterns = 'RecycleBin\.Native|windows-recycle-bin\.ps1|scripts[\\/]|SHFileOperation|IFileOperation|NativeRecycle|validateWindowsRecycle|cannotRemoveWindows|\bwriteFile(Sync)?\b|\bappendFile(Sync)?\b|\bunlink(Sync)?\b|\brmSync\b|\brmdir(Sync)?\b|\brename(Sync)?\b|\bchmod(Sync)?\b|\bchown(Sync)?\b|\butimes(Sync)?\b|\bcreateWriteStream\b'
+          $hits = Get-ChildItem -Recurse -File dist | Select-String -Pattern $patterns -List
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host $_ }
+            throw "built output contains a cleanup bridge or filesystem mutation path"
+          }
+      - name: Package contents exclude scripts
+        shell: pwsh
+        run: |
+          $pack = npm pack --json --dry-run --ignore-scripts | Out-String | ConvertFrom-Json
+          $paths = @($pack[0].files | ForEach-Object { $_.path })
+          if ($paths -match '^scripts/') {
+            $paths | Where-Object { $_ -match '^scripts/' }
+            throw "package unexpectedly contains scripts/"
+          }
+          if (-not ($paths -contains 'bin/fix-storage.cjs')) { throw "package is missing bin/fix-storage.cjs" }
+          if (-not ($paths -match '^dist/')) { throw "package is missing dist/" }

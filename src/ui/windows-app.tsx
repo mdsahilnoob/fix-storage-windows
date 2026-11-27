@@ -102,6 +102,24 @@ export function createWindowsApp(ink: InkModule) {
         <Text dimColor>Informational only. Review these paths yourself outside the application.</Text>
         {recommendation.paths.slice(0, 4).map((path) => <Text key={path} wrap="truncate">  {path}</Text>)}
         {recommendation.paths.length > 4 ? <Text dimColor>  … and {recommendation.paths.length - 4} more</Text> : null}
+        {recommendation.duplicateGroups?.length ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold>Possible duplicate groups (contents not compared)</Text>
+            {recommendation.duplicateGroups.slice(0, 3).map((group) => (
+              <Box key={group.id} flexDirection="column">
+                <Text wrap="truncate">
+                  {group.count} × {group.name} · {size(group.size)} each · {size(group.estimatedConditionalBytes)} conditional saving if contents match
+                </Text>
+                {group.paths.slice(0, 3).map((path) => <Text key={path} dimColor wrap="truncate">  {path}</Text>)}
+                {group.paths.length > 3 ? <Text dimColor>  … and {group.paths.length - 3} more paths</Text> : null}
+              </Box>
+            ))}
+            {recommendation.duplicateGroups.length > 3 ? (
+              <Text dimColor>  … and {recommendation.duplicateGroups.length - 3} more candidate groups</Text>
+            ) : null}
+            <Text dimColor wrap="truncate">{recommendation.duplicateGroups?.[0]?.warning}</Text>
+          </Box>
+        ) : null}
       </Box>
     );
   }
@@ -160,7 +178,7 @@ export function createWindowsApp(ink: InkModule) {
         <Text dimColor>{state.scan.phase === "scanning" ? `measuring ${tilde(state.scan.current)}` : "analysis complete"}</Text>
         <Text color="cyan" wrap="truncate">{state.drives.map((item, index) => `${index === state.drive ? "[" : ""}${index + 1}:${item.name}${index === state.drive ? "]" : ""}`).join("  ")}</Text>
         <Text>{gb(state.scan.used)} used of {capacity(state.scan.total)} · {gb(state.scan.available)} free · {pct(state.scan.used, state.scan.total)} full</Text>
-        <Text dimColor>{`estimated category sizes: ${gb(state.scan.measured)} measured · ${size(state.reclaimable().junk + state.reclaimable().unused)} potentially recoverable (estimates may overlap)`}</Text>
+        <Text dimColor>{`estimated category sizes: ${gb(state.scan.measured)} measured · ${size(store.reclaimable().junk + store.reclaimable().unused)} potentially recoverable (estimates may overlap)`}</Text>
         {drive ? <Text dimColor wrap="truncate">{[drive.fstype, drive.driveType, drive.label, drive.mount, drive.readOnly ? "read-only" : ""].filter(Boolean).join(" · ")}</Text> : null}
         <Meter store={store} />
         <Box flexGrow={1} marginTop={1}>

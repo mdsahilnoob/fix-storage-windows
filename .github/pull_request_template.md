@@ -6,15 +6,18 @@
 
 <!-- Do not claim checks that were not run. -->
 
+- [ ] `npm ci --ignore-scripts`
 - [ ] `npm run typecheck`
+- [ ] `npm run build`
+- [ ] `bun test`
 - [ ] `npm run demo`
-- [ ] `npm start -- --dry-run` on a real disk
 - [ ] Relevant items in WINDOWS.md's validation matrix
 
-## If it touches removing files
+## Read-only contract
 
-- [ ] Every real operation goes through `recycleWindows` and the guarded `IFileOperation` recycle provider
-- [ ] Both item and bulk paths retain central policy and provider validation
-- [ ] Exact paths/count/size are shown and a second confirmation is required
-- [ ] `--dry-run` and `--demo` still change nothing on disk
-- [ ] No permanent deletion, fallback deletion, or Recycle Bin emptying was introduced
+- [ ] No filesystem cleanup API, permanent deletion, recycle, move, rename, attribute or permission change was added
+- [ ] No hidden cleanup mode or cleanup flag was added
+- [ ] The archived `scripts/` bridge remains unimported and excluded from the package
+- [ ] Recommendations remain informational and never read file contents for duplicate claims
+- [ ] CLI cleanup requests still fail before application modules load
+- [ ] `--demo`, `--plain`, `--json` and the interactive view still change nothing on disk

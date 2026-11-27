@@ -30,11 +30,8 @@ Automated cleanup is not supported in v1. Recommendations are informational
 only; you decide whether to act on them outside this application.
 `;
 
-if (args.includes("-h") || args.includes("--help")) {
-  process.stdout.write(HELP);
-  process.exit(0);
-}
-
+// Reject cleanup requests before help or any application module loads: a
+// cleanup flag must never be masked by --help or by another option.
 const cleanupOptions = new Set([
   "--clean", "--cleanup", "--delete", "--remove", "--recycle", "--trash",
   "--apply", "--execute", "--empty-trash", "--empty-recycle-bin", "--purge", "--dry-run",
@@ -48,6 +45,11 @@ for (const arg of args) {
     );
     process.exit(2);
   }
+}
+
+if (args.includes("-h") || args.includes("--help")) {
+  process.stdout.write(HELP);
+  process.exit(0);
 }
 
 const known = new Set(["--demo", "--plain", "--json", "--drives"]);

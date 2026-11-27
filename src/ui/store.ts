@@ -15,13 +15,19 @@ import {
   reveal,
   type ListHandle,
 } from "../core/browse";
-import { estimate, plan, type Reviewable } from "../core/clean";
-import { demoDrives, demoLayout, demoPlan, startDemoScan } from "../core/demo";
+import { demoDrives, demoLayout, startDemoScan } from "../core/demo";
 import { listDrives, pickDrive, type Drive, type Partition } from "../core/drives";
 import { size, tilde } from "../core/format";
 import { layoutFor, type Layout } from "../core/layout";
 import { FILE_MANAGER, IS_MAC, IS_WINDOWS, OS_NAME, TRASH_NAME } from "../core/platform";
-import { duplicateCandidates, recommendationForItem, type Recommendation } from "../core/recommendations";
+import {
+  categoryRecommendation,
+  isReviewCategory,
+  recommendationForItem,
+  REVIEW_CATEGORIES,
+  type Recommendation,
+  type ReviewCategory,
+} from "../core/recommendations";
 import { normalPath } from "../core/windows/paths";
 import { emptySnapshot, startScan, type Item, type ScanHandle, type ScanSnapshot } from "../core/scan";
 
@@ -488,55 +494,44 @@ export class Store {
     });
   }
 
-  canReview(id: CategoryId): id is Reviewable {
-    return this.state.scan.phase === "done" && (id === "caches" || id === "trash") && this.state.scan.sizes[id] >= WORTH_REVIEW;
+  canReview(id: CategoryId): id is ReviewCategory {
+    return isReviewCategory(id) && this.state.scan.phase === "done" && this.state.scan.sizes[id] >= WORTH_REVIEW;
   }
 
-  suggestion(): CategoryId | null {
+  suggestion(): ReviewCategory | null {
     if (this.state.scan.phase !== "done") return null;
-    const candidates = CATEGORIES.filter((c) => c.tier !== "keep" && this.state.scan.sizes[c.id] >= WORTH_REVIEW);
-    candidates.sort((a, b) => this.state.scan.sizes[b.id] - this.state.scan.sizes[a.id]);
-    return candidates[0]?.id ?? null;
+    const candidates = REVIEW_CATEGORIES
+      .filter((id) => this.state.scan.sizes[id] >= WORTH_REVIEW)
+      .sort((a, b) => this.state.scan.sizes[b] - this.state.scan.sizes[a]);
+    return candidates[0] ?? null;
   }
 
-  /** Prepare a category recommendation from read-only scan data. */
+  /** Prepare a recommendation for the requested supported category only. */
   async reviewCategory(id: CategoryId = this.state.selected) {
-    const layout = this.state.layout;
-    if (!layout || this.state.scan.phase !== "done" || this.state.action) return;
-    const reviewable: Reviewable = id === "trash" ? "trash" : "caches";
-    const category = id === "trash" ? "trash" : "caches";
-    this.set({ action: { id: category, current: "" }, note: "Preparing recommendations…", recommendation: null });
-    try {
-      const items = this.options.demo
-        ? demoPlan(reviewable, layout)
-        : await plan(reviewable, this.state.scan.items[reviewable], layout, {
-            onProgress: ({ path }) => this.set({ action: { id: category, current: path } }),
-          });
-      const recommendations = items.slice(0, 20).map((item) => recommendationForItem(item, category, this.label(item)));
-      const duplicates = duplicateCandidates(items);
-      const bytes = estimate(items);
-      const recommendation: Recommendation = {
-        id: `category:${category}`,
-        title: category === "trash" ? "Check Recycle Bin usage" : "Review cache storage",
-        reason: `${items.length} direct items found. ${duplicates.length} possible duplicate groups. Compare these yourself; no file is modified.`,
-        category,
-        kind: category === "trash" ? "recycle-bin" : "cache",
-        verdict: "unused",
-        paths: items.slice(0, 10).map((item) => item.path),
-        estimatedBytes: bytes,
-      };
-      this.set({
-        action: null,
-        selected: category,
-        recommendation,
-        note: `Estimated cleanup opportunity: ${size(bytes)}. Recommendation only; this app changes nothing.`,
-      });
-    } catch (error) {
-      this.set({
-        action: null,
-        note: `Could not prepare recommendation: ${error instanceof Error ? error.message : String(error)}`,
-      });
+    if (this.state.scan.phase !== "done") {
+      this.set({ note: "Wait for the storage analysis to finish before preparing recommendations.", recommendation: null });
+      return;
     }
+    if (!isReviewCategory(id)) {
+      this.set({
+        note: `Category recommendations are not available for ${CATEGORY[id]?.name ?? id}. No other category was substituted.`,
+        recommendation: null,
+      });
+      return;
+    }
+    const category = id;
+    const items = this.state.scan.items[category].slice(0, MAX_ROWS);
+    if (items.length === 0) {
+      this.set({ note: `${CATEGORY[category].name}: no measured items to review.`, recommendation: null });
+      return;
+    }
+    const recommendation: Recommendation = categoryRecommendation(category, items);
+    this.set({
+      action: null,
+      selected: category,
+      recommendation,
+      note: `Estimated cleanup opportunity: ${size(recommendation.estimatedBytes)}. Recommendation only; this app changes nothing.`,
+    });
   }
 
   stop() {

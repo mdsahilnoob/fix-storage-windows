@@ -128,7 +128,7 @@ Use a current Windows Terminal with a UTF-8 capable monospace font.
 - Network, offline, BitLocker-locked and unusual filesystem states are reported conservatively.
 - No Known Folder API integration; standard profile names and environment variables are used.
 - Windows Terminal, PowerShell 5.1/7 and legacy Windows Console rendering remain to be validated on supported builds.
-- No runtime validation has been performed in this development phase.
+- Partial runtime validation has been performed on Windows 11 x64; the full matrix below remains required before a release claim.
 
 ## Validation still required
 

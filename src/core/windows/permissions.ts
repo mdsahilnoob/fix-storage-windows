@@ -1,7 +1,6 @@
-import { promises as fsp } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Layout } from "../layout";
-import { atOrInside, driveRoot, extendedPath, insidePath, isDriveRoot, normalPath, samePath } from "./paths";
+import { atOrInside, driveRoot, insidePath, isDriveRoot, samePath } from "./paths";
 
 function protectedTrees(layout: Layout): string[] {
   // A folder-mounted volume has its own root at drive.mount, not at the
@@ -44,16 +43,16 @@ function protectedRoots(layout: Layout): string[] {
   ];
 }
 
-/** Central Windows removal policy, used by both item and category cleanup. */
-export function cannotRemoveWindows(path: string, layout: Layout): string | null {
+/** Windows read-only review restriction: why a path must stay informational. */
+export function windowsReviewRestriction(path: string, layout: Layout): string | null {
   if (!isAbsolute(path)) return "Not an absolute Windows path.";
   if (layout.lookOnly) return layout.lookOnly;
   const driveType = layout.drive.driveType?.toLowerCase();
   if (!driveType || !["fixed", "removable"].includes(driveType)) {
-    return "The Recycle Bin is not verified for this volume type; cleanup is disabled here.";
+    return "The Recycle Bin is not verified for this volume type; this location remains informational.";
   }
   const target = resolve(path);
-  if (isDriveRoot(target)) return "A volume root cannot be moved to the Recycle Bin.";
+  if (isDriveRoot(target)) return "A volume root is not a review candidate.";
   if (protectedTrees(layout).some((folder) => atOrInside(target, folder))) {
     return "Windows, installed applications, or the Recycle Bin manages this location.";
   }
@@ -67,38 +66,4 @@ export function cannotRemoveWindows(path: string, layout: Layout): string | null
   if (layout.foreign(target)) return "This location belongs to another volume.";
   if (!layout.roots.some((item) => insidePath(target, item.path))) return "Outside the folders this tool measures.";
   return null;
-}
-
-function onSelectedMount(canonical: string, layout: Layout): string {
-  if (!layout.drive.device) return canonical;
-  const device = normalPath(layout.drive.device);
-  const real = normalPath(canonical);
-  if (!device || (real !== device && !real.startsWith(device + "\\"))) return canonical;
-  const suffix = real === device ? "" : real.slice(device.length);
-  return layout.drive.mount + suffix;
-}
-
-/** Last-line defense immediately before Shell recycling. */
-export async function validateWindowsRecycle(path: string, layout: Layout): Promise<void> {
-  const reason = cannotRemoveWindows(path, layout);
-  if (reason) throw new Error(reason);
-  let stat;
-  try {
-    stat = await fsp.lstat(extendedPath(path));
-  } catch (error) {
-    throw new Error(`Cannot access ${path}: ${(error as Error).message}`);
-  }
-  if (stat.isSymbolicLink()) throw new Error("Junctions and symbolic links are not cleanup candidates; the item was left untouched.");
-  let canonical: string;
-  try {
-    canonical = await fsp.realpath(extendedPath(path));
-  } catch (error) {
-    throw new Error(`Cannot resolve ${path} safely: ${(error as Error).message}`);
-  }
-  const mountedCanonical = onSelectedMount(canonical, layout);
-  if (normalPath(mountedCanonical) !== normalPath(path)) {
-    throw new Error("The path resolves through a junction, symbolic link, SUBST drive, or alias; it was left untouched.");
-  }
-  const canonicalReason = cannotRemoveWindows(mountedCanonical, layout);
-  if (canonicalReason) throw new Error(canonicalReason);
 }

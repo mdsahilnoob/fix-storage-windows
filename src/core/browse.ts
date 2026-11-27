@@ -8,7 +8,7 @@ import { homeTrash, type Layout } from "./layout";
 import { IS_MAC, IS_WINDOWS, OS_NAME } from "./platform";
 import { windowsUsage } from "./windows/metadata";
 import { normalPath, windowsEntryKind } from "./windows/paths";
-import { cannotRemoveWindows } from "./windows/permissions";
+import { windowsReviewRestriction } from "./windows/permissions";
 import { revealWindows } from "./windows/reveal";
 import { findWindowsCulprit } from "./windows/scan";
 import { du, type Item } from "./scan";
@@ -400,7 +400,7 @@ const LINUX_MANAGED = [
 
 /** Why an item is excluded from recommendations, or null when review is allowed. */
 export function reviewRestriction(path: string, layout: Layout): string | null {
-  if (IS_WINDOWS) return cannotRemoveWindows(path, layout);
+  if (IS_WINDOWS) return windowsReviewRestriction(path, layout);
   if (!path.startsWith("/")) return "Not a real path.";
   if (layout.lookOnly) return capitalize(layout.lookOnly) + ".";
   // Judge a second view of a folder (a bind mount) by the folder it shows.

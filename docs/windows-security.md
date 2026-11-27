@@ -37,7 +37,7 @@ A recommendation includes:
 - a reason based on category and classification;
 - an explicit statement that the application changes nothing.
 
-Recommendations are grouped by temporary files, caches, large files, downloads, logs, development artifacts, duplicate candidates and Recycle Bin usage. Duplicate candidates use name and byte size only; file contents are not read.
+Recommendations are grouped by temporary files, caches, large files, downloads, logs, development artifacts, possible duplicate groups and Recycle Bin usage. Possible duplicates use name and byte size only; file contents are not read, hashed or compared.
 
 ## Protected locations
 
@@ -45,7 +45,7 @@ Protected-path rules remain in force for recommendations. System-managed data, p
 
 ## Windows-specific checks retained
 
-Read-only preflight logic still verifies volume mount resolution and identity before reporting Recycle Bin usage. Nothing in these checks schedules an operation.
+Recycle Bin reporting is descriptive only. The active runtime contains no recycle preflight and schedules no operation.
 
 ## Failure semantics
 
