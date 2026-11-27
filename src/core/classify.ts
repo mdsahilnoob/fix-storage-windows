@@ -10,7 +10,7 @@ import type { Item } from "./scan";
  * yours:  your data, shown for context only.
  * system: managed by the OS or another tool; not a review candidate.
  */
-export type Verdict = "junk" | "unused" | "yours" | "system";
+export type Verdict = "junk" | "unused" | "yours" | "system" | "review";
 
 export interface Usage {
   /** Milliseconds since epoch. */

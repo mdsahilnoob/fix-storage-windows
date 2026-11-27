@@ -8,7 +8,7 @@ import { classify, shortAge, type Verdict } from "../core/classify";
 import { capacity, gb, size, tilde } from "../core/format";
 import { IS_MAC, IS_WINDOWS, REVEAL_LABEL } from "../core/platform";
 import { REVIEW_CATEGORIES, type ReviewCategory } from "../core/recommendations";
-import type { Item } from "../core/scan";
+import { unmeasuredBytes, type Item } from "../core/scan";
 import { BAR_ROWS, BarCanvas, HEADROOM_ROWS, diskSegments, type BarModel } from "./bar";
 import { MAX_ROWS, type AppState, type Store } from "./store";
 
@@ -30,6 +30,7 @@ const VERDICT: Record<Verdict, { color: Rgb; text: Color; tag: string }> = {
   unused: { color: [251, 191, 36], text: AMBER, tag: "unused" },
   yours: { color: [120, 120, 120], text: MUTED, tag: "" },
   system: { color: [100, 116, 139], text: "#7c8aa0", tag: "system" },
+  review: { color: [34, 211, 238], text: "#22d3ee", tag: "review" },
 };
 
 /** Width of n monospace characters. Text drops trailing spaces, so columns get real widths instead of padEnd. */
@@ -146,7 +147,7 @@ function Dots({ fraction, color, count, fs, seed, rows = 1, dim = false }: { fra
 
 function barModel(state: AppState): BarModel {
   const { scan } = state;
-  const focus = scan.phase === "done" && !state.action ? state.selected : null;
+  const focus = scan.phase === "completed" && !state.action ? state.selected : null;
   return {
     segments: diskSegments(scan),
     hover: state.hover ?? focus,
@@ -361,7 +362,7 @@ function QuickWins({ state, store, fs }: Ctx) {
       </Box>
     );
   }
-  if (state.scan.phase !== "done") return <T fs={fs} color={FAINT}>looking for storage opportunities…</T>;
+  if (state.scan.phase !== "completed") return <T fs={fs} color={FAINT}>complete analysis required for category recommendations</T>;
   const ids = REVIEW_CATEGORIES.filter((id) => store.canReview(id) || state.action?.id === id);
   if (ids.length === 0) return <T fs={fs} color={FAINT}>no prominent recommendation opportunities</T>;
   const total = ids.reduce((sum, id) => sum + state.scan.sizes[id], 0);
@@ -370,7 +371,7 @@ function QuickWins({ state, store, fs }: Ctx) {
     <Box style={{ flexDirection: "column", gap: fs * 0.35 }}>
       <Box>
         <T fs={fs} color={GREEN} bold>{gb(total)}</T>
-        <T fs={fs} color={MUTED}>{" estimated opportunity"}</T>
+        <T fs={fs} color={MUTED}>{" measured storage to review"}</T>
       </Box>
       {ids.map((id) => (
         <Box key={id} style={{ gap: fs * 0.6 }}>
@@ -615,6 +616,7 @@ function Empty({ state, store, fs }: Ctx) {
   else if (!state.layout) text = "looking at this drive…";
   else if (state.junkOnly) text = "nothing here looks like junk · f to show everything";
   else if (state.scan.phase === "scanning" && state.stack.length === 0) text = "still measuring…";
+  else if (state.scan.phase !== "completed" && state.stack.length === 0) text = "partial analysis; nothing measured here";
   else if (id === "system")
     text = IS_MAC
       ? "macOS itself, snapshots, swap and anything this scan could not read. macOS manages it."
@@ -722,9 +724,15 @@ export function App({ root, store }: { root: Root; store: Store }) {
       <T fs={fs} color={GREEN} bold>READ-ONLY MODE — NO FILES WILL BE MODIFIED</T>
       <Box style={{ height: fs * 0.4, flexShrink: 0 }} />
       <Totals {...ctx} />
-      {scan.phase === "scanning" || excess > 0 ? (
+      {scan.phase !== "completed" || excess > 0 ? (
         <T fs={fs} color={MUTED}>
-          {scan.phase === "scanning" ? `${gb(scan.measured)} measured so far` : `${gb(scan.measured)} measured · ${size(excess)} above filesystem usage`}
+          {scan.phase === "scanning"
+            ? `${gb(scan.measured)} measured so far`
+            : scan.phase === "cancelled"
+              ? `analysis cancelled · partial results · ${size(unmeasuredBytes(scan))} unmeasured`
+              : scan.phase === "failed"
+                ? `analysis failed${scan.error ? `: ${scan.error}` : ""} · partial results`
+                : `${gb(scan.measured)} measured · ${size(excess)} above filesystem usage`}
         </T>
       ) : null}
       {cells ? <CellMeter state={state} fs={fs} /> : <Meter root={root} store={store} fs={fs} />}
@@ -735,7 +743,7 @@ export function App({ root, store }: { root: Root; store: Store }) {
       {state.recommendation ? (
         <Box style={{ flexDirection: "column", flexShrink: 0 }}>
           <T fs={fs} color={GREEN} bold>{state.recommendation.title}</T>
-          <T fs={fs} color={MUTED} wrap>{`${size(state.recommendation.estimatedBytes)} estimated cleanup opportunity · ${state.recommendation.reason}`}</T>
+          <T fs={fs} color={MUTED} wrap>{`${size(state.recommendation.estimatedBytes)} measured storage to review · ${state.recommendation.reason}`}</T>
           <T fs={fs} color={FAINT}>Informational only. Review these paths yourself outside the application.</T>
           {state.recommendation.duplicateGroups?.length ? (
             <Box style={{ flexDirection: "column" }}>
@@ -743,7 +751,7 @@ export function App({ root, store }: { root: Root; store: Store }) {
               {state.recommendation.duplicateGroups.slice(0, 3).map((group) => (
                 <Box key={group.id} style={{ flexDirection: "column" }}>
                   <T fs={fs} color={MUTED} wrap>
-                    {`${group.count} × ${group.name} · ${size(group.size)} each · ${size(group.estimatedConditionalBytes)} conditional saving if contents match`}
+                    {`${group.count} × ${group.name} · ${size(group.size)} each · ${size(group.estimatedConditionalBytes)} conditional logical size if contents match; physical recovery is not guaranteed`}
                   </T>
                   <T fs={fs} color={FAINT} wrap>
                     {`${group.paths.slice(0, 3).join("  ")}${group.paths.length > 3 ? `  … and ${group.paths.length - 3} more paths` : ""}`}

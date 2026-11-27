@@ -210,8 +210,21 @@ export function startDemoScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot)
   const { sizes, paths } = disk(layout);
   const snap = { ...emptySnapshot(), ...demoSpace(layout.drive) };
   let timer: NodeJS.Timeout | null = null;
+  let finished = false;
+  let resolveDone!: (snapshot: ScanSnapshot) => void;
+
+  const finish = (phase: "completed" | "cancelled") => {
+    if (finished) return;
+    finished = true;
+    if (timer) clearInterval(timer);
+    snap.current = "";
+    snap.phase = phase;
+    onUpdate({ ...snap, sizes: { ...snap.sizes } });
+    resolveDone(snap);
+  };
 
   const done = new Promise<ScanSnapshot>((resolve) => {
+    resolveDone = resolve;
     const steps = CATEGORIES.flatMap((category) => {
       if (category.id === "system" || paths[category.id].length === 0) return [];
       const parts = 14;
@@ -231,20 +244,16 @@ export function startDemoScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot)
         onUpdate({ ...snap, sizes: { ...snap.sizes } });
         return;
       }
-      if (timer) clearInterval(timer);
       snap.sizes = { ...sizes };
       snap.measured = snap.used;
       for (const category of CATEGORIES) snap.items[category.id] = split(sizes[category.id], paths[category.id]);
-      snap.current = "";
-      snap.phase = "done";
-      onUpdate({ ...snap, sizes: { ...snap.sizes } });
-      resolve(snap);
+      finish("completed");
     }, 35);
   });
 
   return {
     cancel() {
-      if (timer) clearInterval(timer);
+      finish("cancelled");
     },
     done,
   };

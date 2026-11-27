@@ -17,8 +17,9 @@ fix-storage v1 is **READ-ONLY**. It analyzes storage, estimates potential cleanu
 - Category classification, large-item reporting and culprit discovery.
 - Temporary/cache/developer/game/storage category identification.
 - Possible duplicate candidates grouped by name and byte size; file contents are not read.
-- Recommendations with reasons and estimated opportunity sizes.
-- JSON and plain-text reports.
+- Recommendations with reasons and measured storage estimates; these are not recovery amounts.
+- Explicit scan states: scanning, completed, cancelled and failed.
+- JSON and plain-text reports, including partial-analysis status and unmeasured bytes.
 - Ink terminal UI with drive selection, browsing, filtering and refresh.
 - Explorer reveal for selected paths.
 
@@ -38,7 +39,7 @@ The earlier Recycle Bin native bridge remains in the repository as archived sour
 ## Requirements
 
 - Windows 10 or Windows 11, x64
-- Node.js 20.11 or newer, including npm
+- Node.js 22 or newer, including npm
 - Windows PowerShell 5.1 (`powershell.exe`) for read-only CIM volume discovery
 - Windows Terminal, PowerShell, PowerShell 7, or Windows Console
 
@@ -88,16 +89,18 @@ Cleanup-implying options are rejected before any application module is loaded:
 
 They print an explanation that automated cleanup is not supported in v1.
 
-## Accounting
+## Scan states and accounting
+
+A scan is `scanning`, `completed`, `cancelled` or `failed`. Cancelled and failed scans preserve partial measurements, report remaining unmeasured bytes separately, and do not add those bytes to System data. Complete-category recommendations require a `completed` scan.
 
 `movedToRecycleBinBytes` and reclaimed-byte accounting have been removed from v1. Reports and the UI show:
 
-- `estimated cleanup opportunity`
-- `potentially recoverable space`
+- `category storage estimate`
+- `measured storage to review`
 - `estimated category size`
 - `recommended review`
 
-No successful cleanup count is displayed.
+Possible duplicate groups show conditional logical size only. Same name and size do not prove identical contents; hard links, sparse files and compression can change physical savings. No successful cleanup count or guaranteed recovery amount is displayed.
 
 ## Troubleshooting
 
@@ -111,7 +114,7 @@ Build first and use a real terminal. Use `node bin/fix-storage.cjs --plain` for 
 
 ### Permission errors during scanning
 
-Unreadable paths are reported or counted as System data. Run as the normal user; do not elevate to force access.
+Unreadable paths are reported. After a completed scan, remaining unmeasured space is accounted as System data; after cancellation or failure it remains separately `unmeasured`. Run as the normal user; do not elevate to force access.
 
 ### Sizes differ from Explorer
 

@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Asynchronous recursive scanning with bounded I/O, cancellation, long-path/Unicode handling, permission reporting and reparse-point avoidance.
 - Windows storage layouts for temporary files, AppData, application caches, developer tools/caches/stores, game storage, personal folders, secondary drives, system data and existing Recycle Bin usage reporting.
 - Windows-aware classification and modification-time metadata that is never presented as reliable last-opened evidence.
-- Informational cleanup recommendations with exact paths, reasons and estimated opportunity sizes.
+- Informational recommendations with exact paths, reasons and measured storage estimates; these are not recovery amounts.
 - Possible duplicate-file candidates grouped by name and byte size; contents are never read or hashed.
 - Native Explorer open/reveal integration without shell-interpolated filenames.
 - Interactive Ink/React terminal UI with drive selection, category browsing, culprit discovery, filtering, recommendations and refresh.
@@ -28,10 +28,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
-- Category sizes, potential savings and duplicate candidates are explicitly estimates.
+- Scans now report `scanning`, `completed`, `cancelled` or `failed`; cancelled and failed scans preserve partial results, keep unmeasured bytes separate, and cannot produce complete-category recommendations.
+- Category estimates use the complete measured category; only displayed paths are bounded. Category verdicts use the neutral `review` state.
+- Duplicate warnings distinguish conditional logical size from physical disk-space recovery and call out hard links, sparse files and compression.
 - Reports use read-only terminology and identify `mode: read-only-analysis-and-recommendations`.
 - The archived native Recycle Bin bridge is excluded from runtime paths and the published package.
 - The Windows UI uses Ink because Pixel 0.3.1 has no Windows runtime.
+- Supported Node.js versions are 22, 24 and 26.
 
 ### Original project history
 

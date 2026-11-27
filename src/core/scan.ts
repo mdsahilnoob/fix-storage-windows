@@ -15,8 +15,10 @@ export interface Item {
   dir?: boolean;
 }
 
+export type ScanPhase = "scanning" | "completed" | "cancelled" | "failed";
+
 export interface ScanSnapshot extends Space {
-  phase: "scanning" | "done";
+  phase: ScanPhase;
   /** Sum of the file and folder estimates, before accounting for unmeasured space. */
   measured: number;
   sizes: Record<CategoryId, number>;
@@ -26,6 +28,8 @@ export interface ScanSnapshot extends Space {
   current: string;
   /** Folders this process may not read. */
   blocked: string[];
+  /** Failure detail when phase is "failed". */
+  error?: string;
 }
 
 export interface ScanHandle {
@@ -100,10 +104,12 @@ interface DuResult {
 }
 
 /** Disk usage of one folder via du on Unix, which is far faster than walking it in JS. */
-function duUnix(path: string, children: Set<ChildProcess>): Promise<DuResult> {
+function duUnix(path: string, children: Set<ChildProcess>, isCancelled: () => boolean): Promise<DuResult> {
   return new Promise((resolve) => {
     const child = spawn("du", ["-skx", path], { stdio: ["ignore", "pipe", "pipe"] });
     children.add(child);
+    // Cancellation can race with spawning. Stop this child as soon as it exists.
+    if (isCancelled()) child.kill();
     let out = "";
     let err = "";
     child.stdout.on("data", (chunk) => (out += chunk));
@@ -147,7 +153,7 @@ function duUnix(path: string, children: Set<ChildProcess>): Promise<DuResult> {
 
 /** One measurement policy shared by scans, browsing and post-clean reports. */
 export function du(path: string, children: Set<ChildProcess>, isCancelled: () => boolean = () => false): Promise<DuResult> {
-  return IS_WINDOWS ? windowsDu(path, isCancelled) : duUnix(path, children);
+  return IS_WINDOWS ? windowsDu(path, isCancelled) : duUnix(path, children, isCancelled);
 }
 
 interface Unit {
@@ -169,6 +175,7 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
   const snap = emptySnapshot();
   const children = new Set<ChildProcess>();
   let cancelled = false;
+  let finished = false;
   let lastEmit = 0;
 
   const emit = (force = false) => {
@@ -183,119 +190,144 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
     snap.measured += bytes;
   };
 
-  const run = async (): Promise<ScanSnapshot> => {
-    Object.assign(snap, await diskSpace(layout.drive));
-    emit(true);
-
-    const all = layout.roots;
-    const pathKey = (path: string) => (IS_WINDOWS ? normalPath(path) : path);
-    const rootPaths = new Set(all.map((r) => pathKey(r.path)));
-    const holdsRoot = (path: string) => {
-      const key = pathKey(path);
-      const prefix = key + (IS_WINDOWS ? "\\" : "/");
-      return all.some((r) => pathKey(r.path).startsWith(prefix));
-    };
-
-    const units: Unit[] = [];
-
-    // Lists a folder, queueing each subfolder for du and adding loose files
-    // straight away. Subfolders that hold another root are opened instead of
-    // measured whole, so the inner root is not counted twice.
-    const addFile = async (path: string, category: CategoryId) => {
-      try {
-        const stat = await fsp.lstat(IS_WINDOWS ? extendedPath(path) : path);
-        const bytes = IS_WINDOWS ? Number(stat.size) : stat.blocks * 512;
-        add(category, bytes);
-        if (bytes > 0) snap.items[category].push({ path, size: bytes, dir: false });
-      } catch {
-        // vanished or unreadable; nothing to count
-      }
-    };
-
-    // Unreadable system folders are expected; they count as System data anyway.
-    const report = (path: string, category: CategoryId) => {
-      if (category !== "system" && basename(path) !== "lost+found") snap.blocked.push(path);
-    };
-
-    const expand = async (path: string, category: CategoryId, hidden?: CategoryId): Promise<void> => {
-      if (cancelled) return;
-      if (IS_WINDOWS) {
-        const kind = await windowsEntryKind(path);
-        if (kind === "link") {
-          report(path, category);
-          return;
-        }
-        if (kind === "file") {
-          await addFile(path, category);
-          return;
-        }
-        if (kind === "missing") {
-          report(path, category);
-          return;
-        }
-      }
-      let entries;
-      try {
-        entries = await fsp.readdir(IS_WINDOWS ? extendedPath(path) : path, { withFileTypes: true });
-      } catch (error) {
-        // A root can be a single file, like a swap file.
-        if ((error as NodeJS.ErrnoException).code === "ENOTDIR") await addFile(path, category);
-        else if (denied(error)) report(path, category);
-        return;
-      }
-      for (const entry of entries) {
-        const child = join(path, entry.name);
-        if (rootPaths.has(pathKey(child)) || layout.skip(child)) continue;
-        const kind = hidden !== undefined && entry.name.startsWith(".") ? hidden : category;
-        if (entry.isDirectory()) {
-          if (holdsRoot(child)) await expand(child, kind);
-          else units.push({ path: child, category: kind });
-        } else {
-          await addFile(child, kind);
-        }
-      }
-    };
-
-    const order = CATEGORIES.map((c) => c.id);
-    const sorted: Root[] = [...all].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
-    for (const root of sorted) {
-      snap.current = root.path;
-      await expand(root.path, root.category, root.hidden);
-      emit();
-    }
-
-    let next = 0;
-    const worker = async () => {
-      while (!cancelled && next < units.length) {
-        const unit = units[next++];
-        snap.current = unit.path;
-        emit();
-        const result = await du(unit.path, children, () => cancelled);
-        if (cancelled) return;
-        add(unit.category, result.bytes);
-        if (result.bytes > 0) snap.items[unit.category].push({ path: unit.path, size: result.bytes, dir: true });
-        if (result.denied && result.bytes < 1024 * 1024) report(unit.path, unit.category);
-        emit();
-      }
-    };
-    await Promise.all(Array.from({ length: concurrency }, worker));
-
+  const finish = async (phase: "completed" | "cancelled" | "failed", error?: string): Promise<ScanSnapshot> => {
+    if (finished) return snap;
+    finished = true;
     for (const list of Object.values(snap.items)) list.sort((a, b) => b.size - a.size);
-
-    // Whatever the disk reports as used beyond what was measured is the
-    // system's: the OS itself, snapshots, swap, and folders this process may
-    // not read.
-    const after = await diskSpace(layout.drive);
-    if (after.total > 0) Object.assign(snap, after);
-    snap.sizes.system += unmeasuredBytes(snap);
+    if (phase === "completed") {
+      // Only a complete scan accounts for unmeasured space as System data.
+      const after = await diskSpace(layout.drive);
+      if (after.total > 0) Object.assign(snap, after);
+      snap.sizes.system += unmeasuredBytes(snap);
+    }
     snap.current = "";
-    snap.phase = "done";
+    snap.phase = phase;
+    if (error) snap.error = error;
     emit(true);
     return snap;
   };
 
+  const run = async (): Promise<ScanSnapshot> => {
+    try {
+      Object.assign(snap, await diskSpace(layout.drive));
+      if (cancelled) return finish("cancelled");
+      emit(true);
+
+      const all = layout.roots;
+      const pathKey = (path: string) => (IS_WINDOWS ? normalPath(path) : path);
+      const rootPaths = new Set(all.map((r) => pathKey(r.path)));
+      const holdsRoot = (path: string) => {
+        const key = pathKey(path);
+        const prefix = key + (IS_WINDOWS ? "\\" : "/");
+        return all.some((r) => pathKey(r.path).startsWith(prefix));
+      };
+
+      const units: Unit[] = [];
+
+      // Lists a folder, queueing each subfolder for du and adding loose files
+      // straight away. Subfolders that hold another root are opened instead of
+      // measured whole, so the inner root is not counted twice.
+      const addFile = async (path: string, category: CategoryId) => {
+        if (cancelled) return;
+        try {
+          const stat = await fsp.lstat(IS_WINDOWS ? extendedPath(path) : path);
+          if (cancelled) return;
+          const bytes = IS_WINDOWS ? Number(stat.size) : stat.blocks * 512;
+          add(category, bytes);
+          if (bytes > 0) snap.items[category].push({ path, size: bytes, dir: false });
+        } catch {
+          // vanished or unreadable; nothing to count
+        }
+      };
+
+      // Unreadable system folders are expected; they count as System data after
+      // a complete scan. Cancelled and failed scans keep them separate.
+      const report = (path: string, category: CategoryId) => {
+        if (category !== "system" && basename(path) !== "lost+found") snap.blocked.push(path);
+      };
+
+      const expand = async (path: string, category: CategoryId, hidden?: CategoryId): Promise<void> => {
+        if (cancelled) return;
+        if (IS_WINDOWS) {
+          const kind = await windowsEntryKind(path);
+          if (cancelled) return;
+          if (kind === "link") {
+            report(path, category);
+            return;
+          }
+          if (kind === "file") {
+            await addFile(path, category);
+            return;
+          }
+          if (kind === "missing") {
+            report(path, category);
+            return;
+          }
+        }
+        let entries;
+        try {
+          entries = await fsp.readdir(IS_WINDOWS ? extendedPath(path) : path, { withFileTypes: true });
+        } catch (error) {
+          // A root can be a single file, like a swap file.
+          if ((error as NodeJS.ErrnoException).code === "ENOTDIR") await addFile(path, category);
+          else if (denied(error)) report(path, category);
+          return;
+        }
+        for (const entry of entries) {
+          if (cancelled) return;
+          const child = join(path, entry.name);
+          if (rootPaths.has(pathKey(child)) || layout.skip(child)) continue;
+          const kind = hidden !== undefined && entry.name.startsWith(".") ? hidden : category;
+          if (entry.isDirectory()) {
+            if (holdsRoot(child)) {
+              await expand(child, kind);
+              if (cancelled) return;
+            } else {
+              units.push({ path: child, category: kind });
+            }
+          } else {
+            await addFile(child, kind);
+            if (cancelled) return;
+          }
+        }
+      };
+
+      const order = CATEGORIES.map((c) => c.id);
+      const sorted: Root[] = [...all].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
+      for (const root of sorted) {
+        if (cancelled) return finish("cancelled");
+        snap.current = root.path;
+        await expand(root.path, root.category, root.hidden);
+        if (cancelled) return finish("cancelled");
+        emit();
+      }
+
+      let next = 0;
+      const worker = async () => {
+        while (!cancelled && next < units.length) {
+          const unit = units[next++];
+          snap.current = unit.path;
+          emit();
+          const result = await du(unit.path, children, () => cancelled);
+          if (cancelled) return;
+          add(unit.category, result.bytes);
+          if (result.bytes > 0) snap.items[unit.category].push({ path: unit.path, size: result.bytes, dir: true });
+          if (result.denied && result.bytes < 1024 * 1024) report(unit.path, unit.category);
+          emit();
+        }
+      };
+      await Promise.all(Array.from({ length: concurrency }, worker));
+      if (cancelled) return finish("cancelled");
+
+      return finish("completed");
+    } catch (error) {
+      return finish("failed", error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return {
     cancel() {
+      if (finished) return;
       cancelled = true;
       for (const child of children) child.kill();
     },

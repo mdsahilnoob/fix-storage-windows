@@ -4,7 +4,7 @@ import { CATEGORIES, CATEGORY, TIER_LABEL, type CategoryId, type Rgb } from "../
 import { shortAge } from "../core/classify";
 import { capacity, gb, size, tilde } from "../core/format";
 import type { Recommendation } from "../core/recommendations";
-import type { Item } from "../core/scan";
+import { unmeasuredBytes, type Item } from "../core/scan";
 import { diskSegments } from "./bar";
 import type { Store } from "./store";
 
@@ -72,7 +72,7 @@ export function createWindowsApp(ink: InkModule) {
     const selected = state.row === index;
     const label = store.label(item);
     const usage = state.usage[item.path];
-    const color = label.verdict === "junk" ? "green" : label.verdict === "unused" ? "yellow" : label.verdict === "system" ? "blue" : "gray";
+    const color = label.verdict === "junk" ? "green" : label.verdict === "unused" ? "yellow" : label.verdict === "review" ? "cyan" : label.verdict === "system" ? "blue" : "gray";
     return (
       <Box flexDirection="column">
         <Text color={selected ? "white" : "gray"} bold={selected} wrap="truncate">
@@ -97,7 +97,7 @@ export function createWindowsApp(ink: InkModule) {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1} marginTop={1}>
         <Text color="green" bold>{recommendation.title}</Text>
-        <Text>{size(recommendation.estimatedBytes)} estimated cleanup opportunity · {CATEGORY[recommendation.category].name}</Text>
+        <Text>{size(recommendation.estimatedBytes)} measured storage to review · {CATEGORY[recommendation.category].name}</Text>
         <Text wrap="truncate">{recommendation.reason}</Text>
         <Text dimColor>Informational only. Review these paths yourself outside the application.</Text>
         {recommendation.paths.slice(0, 4).map((path) => <Text key={path} wrap="truncate">  {path}</Text>)}
@@ -108,7 +108,7 @@ export function createWindowsApp(ink: InkModule) {
             {recommendation.duplicateGroups.slice(0, 3).map((group) => (
               <Box key={group.id} flexDirection="column">
                 <Text wrap="truncate">
-                  {group.count} × {group.name} · {size(group.size)} each · {size(group.estimatedConditionalBytes)} conditional saving if contents match
+                  {group.count} × {group.name} · {size(group.size)} each · {size(group.estimatedConditionalBytes)} conditional logical size if contents match; physical recovery is not guaranteed
                 </Text>
                 {group.paths.slice(0, 3).map((path) => <Text key={path} dimColor wrap="truncate">  {path}</Text>)}
                 {group.paths.length > 3 ? <Text dimColor>  … and {group.paths.length - 3} more paths</Text> : null}
@@ -175,7 +175,15 @@ export function createWindowsApp(ink: InkModule) {
           <Text bold>fix-storage <Text color="cyan">Windows</Text>{store.options.demo ? " · demo" : ""}</Text>
           <Text color="yellow" bold>READ-ONLY MODE — NO FILES WILL BE MODIFIED</Text>
         </Box>
-        <Text dimColor>{state.scan.phase === "scanning" ? `measuring ${tilde(state.scan.current)}` : "analysis complete"}</Text>
+        <Text dimColor>
+          {state.scan.phase === "scanning"
+            ? `measuring ${tilde(state.scan.current)}`
+            : state.scan.phase === "completed"
+              ? "analysis complete"
+              : state.scan.phase === "cancelled"
+                ? `analysis cancelled · partial results · ${size(unmeasuredBytes(state.scan))} unmeasured`
+                : `analysis failed${state.scan.error ? `: ${state.scan.error}` : ""} · partial results`}
+        </Text>
         <Text color="cyan" wrap="truncate">{state.drives.map((item, index) => `${index === state.drive ? "[" : ""}${index + 1}:${item.name}${index === state.drive ? "]" : ""}`).join("  ")}</Text>
         <Text>{gb(state.scan.used)} used of {capacity(state.scan.total)} · {gb(state.scan.available)} free · {pct(state.scan.used, state.scan.total)} full</Text>
         <Text dimColor>{`estimated category sizes: ${gb(state.scan.measured)} measured · ${size(store.reclaimable().junk + store.reclaimable().unused)} potentially recoverable (estimates may overlap)`}</Text>
@@ -189,11 +197,19 @@ export function createWindowsApp(ink: InkModule) {
             <Text dimColor>{store.allEntries().length} items · modified time (not last-opened time) · f: {state.junkOnly ? "show all" : "junk only"}</Text>
             {state.layout?.lookOnly ? <Text color="yellow">{state.layout.lookOnly}</Text> : null}
             {visible.map((item, offset) => <ItemRow key={item.path} store={store} item={item} index={start + offset} />)}
-            {entries.length === 0 ? <Text dimColor>{state.scan.phase === "scanning" ? "still measuring…" : "nothing here"}</Text> : null}
+            {entries.length === 0 ? (
+              <Text dimColor>
+                {state.scan.phase === "scanning"
+                  ? "still measuring…"
+                  : state.scan.phase === "completed"
+                    ? "nothing here"
+                    : "partial analysis; nothing measured here"}
+              </Text>
+            ) : null}
             {entries.length > visibleCount ? <Text dimColor>showing {start + 1}–{Math.min(entries.length, start + visibleCount)} of {entries.length}; selection scrolls with ↑/↓</Text> : null}
             {selected ? (
               <Box marginTop={1} flexDirection="column">
-                <Text color={limit ? "gray" : "green"}>{limit ?? `c: review ${basename(selected.path)} · ${size(selected.size)} estimated opportunity`}</Text>
+                <Text color={limit ? "gray" : "green"}>{limit ?? `c: review ${basename(selected.path)} · ${size(selected.size)} measured for review`}</Text>
                 <Text dimColor>Enter: open · g: culprit · o/Space: Explorer · c: recommendation · Tab: panes</Text>
               </Box>
             ) : null}

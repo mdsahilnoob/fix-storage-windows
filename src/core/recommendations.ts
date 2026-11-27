@@ -44,7 +44,10 @@ export interface Recommendation {
   kind: RecommendationKind;
   verdict: Verdict;
   paths: string[];
-  /** Estimated logical bytes occupied by the review target. */
+  /**
+   * Measured logical bytes occupied by the review target. This is storage to
+   * review, not an amount that is recoverable or reclaimed.
+   */
   estimatedBytes: number;
   /** Possible duplicates, never presented as confirmed identical files. */
   duplicateGroups?: DuplicateGroup[];
@@ -118,15 +121,17 @@ const CATEGORY_KIND: Record<ReviewCategory, RecommendationKind> = {
 
 /** Build an informational recommendation for one supported category only. */
 export function categoryRecommendation(category: ReviewCategory, items: Item[]): Recommendation {
+  // Use the complete measured category for both the estimate and duplicate
+  // grouping. Only display paths are bounded.
   const duplicateGroups = duplicateCandidates(items);
   const bytes = items.reduce((total, item) => total + item.size, 0);
   return {
     id: `category:${category}`,
     title: CATEGORY_TITLE[category],
-    reason: `${items.length} measured items; ${duplicateGroups.length} possible duplicate groups with matching names and sizes. Contents were not compared. Estimated opportunity only; no file is modified.`,
+    reason: `${items.length} measured items; ${duplicateGroups.length} possible duplicate groups with matching names and sizes. Contents were not compared. Category storage estimate only; measured storage to review, not recoverable space. No file is modified.`,
     category,
     kind: CATEGORY_KIND[category],
-    verdict: "unused",
+    verdict: "review",
     paths: items.slice(0, 10).map((item) => item.path),
     estimatedBytes: bytes,
     duplicateGroups,
@@ -168,7 +173,8 @@ export function duplicateCandidates(items: Item[]): DuplicateGroup[] {
       count: list.length,
       paths: list.map((item) => item.path),
       estimatedConditionalBytes: list[0].size * (list.length - 1),
-      warning: "Contents have not been compared. Same name and byte size only; these are possible, not confirmed, duplicates.",
+      warning:
+        "Contents have not been compared. Same name and byte size do not establish identical contents; these are possible, not confirmed, duplicates. Hard links may share underlying storage, and sparse files or compression can change physical savings. Conditional logical size is not guaranteed disk-space recovery.",
     });
   }
   return result;

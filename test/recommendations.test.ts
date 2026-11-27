@@ -48,10 +48,22 @@ test("every supported category gets its own recommendation instead of falling ba
     expect(recommendation.title).toBe(expectedTitle[category]);
     expect(recommendation.id).toBe(`category:${category}`);
     expect(recommendation.estimatedBytes).toBe(itemsByCategory[category].reduce((total, entry) => total + entry.size, 0));
+    expect(recommendation.verdict).toBe("review");
     expect(recommendation.reason).toContain("Contents were not compared.");
+    expect(recommendation.reason).toContain("Category storage estimate only");
+    expect(recommendation.reason).not.toContain("reclaimed");
+    expect(recommendation.reason).not.toContain("freed");
     if (category !== "caches") {
       expect(recommendation.title).not.toContain("cache storage");
     }
+  }
+});
+
+test("Apps and Documents do not receive an unused category verdict", () => {
+  for (const category of ["apps", "documents"] as const) {
+    const recommendation = categoryRecommendation(category, itemsByCategory[category]);
+    expect(recommendation.verdict).toBe("review");
+    expect(recommendation.verdict).not.toBe("unused");
   }
 });
 
@@ -88,6 +100,39 @@ test("store reports an empty supported category without inventing a recommendati
   await store.reviewCategory("caches");
   expect(store.get().recommendation).toBeNull();
   expect(store.get().note).toContain("no measured items to review");
+});
+
+test("cancelled scans cannot produce complete-category recommendations", async () => {
+  const store = seededStore();
+  const snapshot = store.get().scan;
+  snapshot.phase = "cancelled";
+  (store as unknown as { set(patch: Partial<ReturnType<Store["get"]>>): void }).set({ scan: snapshot });
+
+  expect(store.suggestion()).toBeNull();
+  expect(store.canReview("documents")).toBe(false);
+  await store.reviewCategory("documents");
+  expect(store.get().recommendation).toBeNull();
+  expect(store.get().note).toContain("cancelled");
+});
+
+test("category estimates include more than 150 items and duplicates from the full category", async () => {
+  const store = new Store({ demo: true });
+  const snapshot = emptySnapshot();
+  snapshot.phase = "completed";
+  const many = Array.from({ length: 200 }, (_, index) =>
+    item(`C:\\data\\dir-${index}\\shared.bin`, 1_000_000),
+  );
+  snapshot.items = { ...snapshot.items, documents: many };
+  snapshot.sizes = { ...snapshot.sizes, documents: many.reduce((total, entry) => total + entry.size, 0) };
+  (store as unknown as { set(patch: Partial<ReturnType<Store["get"]>>): void }).set({ scan: snapshot, selected: "documents" });
+
+  await store.reviewCategory("documents");
+  const recommendation = store.get().recommendation;
+  expect(recommendation?.estimatedBytes).toBe(200_000_000);
+  expect(recommendation?.paths).toHaveLength(10);
+  expect(recommendation?.duplicateGroups).toHaveLength(1);
+  expect(recommendation?.duplicateGroups?.[0].count).toBe(200);
+  expect(recommendation?.duplicateGroups?.[0].paths).toHaveLength(200);
 });
 
 test("downloads are classified only when the category and path support it", () => {
@@ -159,6 +204,10 @@ test("duplicate candidates expose groups, paths, matching size and a no-comparis
   expect(group.paths).toEqual(["C:\\Users\\me\\Downloads\\movie.mp4", "C:\\Backup\\movie.mp4"]);
   expect(group.estimatedConditionalBytes).toBe(1_500_000_000);
   expect(group.warning).toContain("Contents have not been compared.");
+  expect(group.warning).toContain("do not establish identical contents");
+  expect(group.warning).toContain("Hard links may share underlying storage");
+  expect(group.warning).toContain("sparse files or compression");
+  expect(group.warning).toContain("not guaranteed disk-space recovery");
   expect(group.warning).toContain("not confirmed");
 });
 
@@ -204,16 +253,18 @@ test("overlapping category estimates stay per-category and are never presented a
 
   expect(apps.estimatedBytes).toBe(400e6);
   expect(documents.estimatedBytes).toBe(400e6);
-  expect(apps.reason).toContain("Estimated opportunity only");
-  expect(documents.reason).toContain("Estimated opportunity only");
+  expect(apps.reason).toContain("Category storage estimate only");
+  expect(documents.reason).toContain("Category storage estimate only");
   expect(apps.reason).not.toContain("reclaimable");
   expect(documents.reason).not.toContain("reclaimable");
+  expect(apps.reason).not.toContain("reclaimed");
+  expect(documents.reason).not.toContain("reclaimed");
 });
 
 function seededStore(): Store {
   const store = new Store({ demo: true });
   const snapshot = emptySnapshot();
-  snapshot.phase = "done";
+  snapshot.phase = "completed";
   snapshot.items = { ...snapshot.items, ...itemsByCategory };
   snapshot.sizes = {
     ...snapshot.sizes,

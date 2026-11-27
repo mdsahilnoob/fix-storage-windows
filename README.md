@@ -14,7 +14,7 @@ Cleanup recommendations are informational only. You decide whether to act on the
 ## Requirements
 
 - Windows 10 or Windows 11, x64
-- Node.js 20.11 or newer, including npm
+- Node.js 22 or newer, including npm
 - Windows Terminal, PowerShell, PowerShell 7, or Windows Console
 
 The native Recycle Bin bridge from earlier development is archived source only. It is not reached by v1 runtime paths and is not included in the published package.
@@ -82,7 +82,7 @@ Category values are estimates based on logical file sizes, not allocated-cluster
 Reports use read-only terminology:
 
 - potentially recoverable space
-- estimated cleanup opportunity
+- measured storage to review
 - estimated category size
 - recommended review
 - storage currently occupied

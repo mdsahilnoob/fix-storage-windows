@@ -19,10 +19,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22, 24]
+        node: [22, 24, 26]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -30,7 +30,7 @@ jobs:
         run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run build
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
       - name: Unit tests
@@ -66,15 +66,8 @@ jobs:
             }
           "
           if ($LASTEXITCODE -ne 0) { throw "cleanup rejection check failed with $LASTEXITCODE" }
-      - name: Compiled output has no cleanup or mutation paths
-        shell: pwsh
-        run: |
-          $patterns = 'RecycleBin\.Native|windows-recycle-bin\.ps1|scripts[\\/]|SHFileOperation|IFileOperation|NativeRecycle|validateWindowsRecycle|cannotRemoveWindows|\bwriteFile(Sync)?\b|\bappendFile(Sync)?\b|\bunlink(Sync)?\b|\brmSync\b|\brmdir(Sync)?\b|\brename(Sync)?\b|\bchmod(Sync)?\b|\bchown(Sync)?\b|\butimes(Sync)?\b|\bcreateWriteStream\b'
-          $hits = Get-ChildItem -Recurse -File dist | Select-String -Pattern $patterns -List
-          if ($hits) {
-            $hits | ForEach-Object { Write-Host $_ }
-            throw "built output contains a cleanup bridge or filesystem mutation path"
-          }
+      - name: Read-only AST and command safety check
+        run: npm run check:readonly
       - name: Package contents exclude scripts
         shell: pwsh
         run: |

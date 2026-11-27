@@ -46,6 +46,7 @@
     "plain": "tsc -p tsconfig.json && node bin/fix-storage.cjs --plain",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "check:readonly": "node tools/check-readonly.cjs",
     "prepack": "npm run build"
   },
   "dependencies": {
@@ -55,10 +56,11 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/react": "^18.3.0",
+    "acorn": "^8.19.0",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=20.11"
+    "node": ">=22"
   },
   "os": [
     "win32"

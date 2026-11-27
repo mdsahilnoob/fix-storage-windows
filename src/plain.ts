@@ -4,7 +4,7 @@ import { describePartition, listDrives, mountCommand, pickDrive, type Drive, typ
 import { capacity, gb, size, tilde } from "./core/format";
 import { layoutFor, type Layout } from "./core/layout";
 import { IS_MAC, IS_WINDOWS } from "./core/platform";
-import { diskSpace, startScan, type ScanSnapshot } from "./core/scan";
+import { diskSpace, startScan, unmeasuredBytes, type ScanSnapshot } from "./core/scan";
 
 /** The value given with --drive, as `--drive x` or `--drive=x`. */
 export function driveArg(args: string[]): string | undefined {
@@ -35,7 +35,7 @@ export async function runPlain(args: string[]): Promise<void> {
   const live = process.stderr.isTTY === true;
 
   const handle = start(layout, (snapshot) => {
-    if (!live || snapshot.phase === "done") return;
+    if (!live || snapshot.phase !== "scanning") return;
     const columns = process.stderr.columns ?? 80;
     const line = `${gb(snapshot.measured)} measured  ${tilde(snapshot.current)}`;
     process.stderr.write(`\r\x1b[2K${line.slice(0, columns - 1)}`);
@@ -108,6 +108,9 @@ export function toJson(scan: ScanSnapshot, layout: Layout): string {
     JSON.stringify(
       {
         drive: { ...driveInfo(layout.drive), lookOnly: layout.lookOnly },
+        phase: scan.phase,
+        partial: scan.phase !== "completed",
+        unmeasured: unmeasuredBytes(scan),
         total: scan.total,
         used: scan.used,
         available: scan.available,
@@ -140,6 +143,13 @@ export function toText(scan: ScanSnapshot, layout: Layout, driveCount: number): 
   if (scan.total > 0 && scan.measured > scan.used) {
     lines.push(`${gb(scan.measured)} measured across files and folders (${size(scan.measured - scan.used)} above filesystem usage)`);
   }
+  if (scan.phase === "cancelled") {
+    lines.push(`Analysis cancelled: partial results only. ${gb(scan.measured)} measured; ${gb(unmeasuredBytes(scan))} unmeasured.`);
+  } else if (scan.phase === "failed") {
+    lines.push(`Analysis failed${scan.error ? `: ${scan.error}` : ""}. Partial results only.`);
+  } else if (scan.phase === "scanning") {
+    lines.push("Analysis in progress; results are partial.");
+  }
   if (layout.lookOnly) lines.push(layout.lookOnly.charAt(0).toUpperCase() + layout.lookOnly.slice(1));
   lines.push("");
 
@@ -158,13 +168,14 @@ export function toText(scan: ScanSnapshot, layout: Layout, driveCount: number): 
   }
 
   if (scan.blocked.length > 0) {
+    const accounted = scan.phase === "completed" ? "and count as System data" : "and remain unmeasured";
     lines.push(
       "",
       IS_MAC
-        ? "Could not read (give your terminal Full Disk Access to include these):"
+        ? `Could not read (give your terminal Full Disk Access to include these; they are left untouched ${accounted}):`
         : IS_WINDOWS
-          ? "Could not read (access denied, locked, or unavailable paths are left untouched and count as System data):"
-          : "Could not read (they belong to root or another user, and count as System data):",
+          ? `Could not read (access denied, locked, or unavailable paths are left untouched ${accounted}):`
+          : `Could not read (they belong to root or another user, and are left untouched ${accounted}):`,
     );
     for (const path of scan.blocked.slice(0, 8)) lines.push(`  ${tilde(path)}`);
     if (scan.blocked.length > 8) lines.push(`  and ${scan.blocked.length - 8} more`);

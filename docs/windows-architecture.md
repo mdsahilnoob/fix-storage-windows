@@ -46,6 +46,8 @@ Only known cache roots are `caches`; AppData, Packages, Docker, package stores, 
 5. Accumulates logical sizes and permission-denied state.
 6. Observes cancellation between batches.
 
+Scans expose `scanning`, `completed`, `cancelled` and `failed` states. Cancellation stops root enumeration and queued measurement, preserves partial results, and leaves remaining unmeasured bytes outside System data. Only a completed scan may produce complete-category recommendations.
+
 Culprit discovery performs a depth-limited walk and retains only dominant branches plus the largest direct children. Metadata uses `mtimeMs` with `Usage.kind = "changed"`; access time is not treated as last-opened.
 
 ## Recommendation flow
@@ -57,7 +59,7 @@ Ink/CLI input -> Store.rescan -> startScan/listFolder/findCulprit
   -> UI note / JSON / plain text
 ```
 
-`recommendationForItem()` builds item-level recommendations for the selected category. `categoryRecommendation()` builds category-level recommendations only for Apps, Developer, Documents, Caches and Trash; any other category is refused instead of being mapped to Caches. `duplicateCandidates()` groups same-name, same-size files as possible duplicates using in-memory scan data. File contents are never read, hashed or compared.
+`recommendationForItem()` builds item-level recommendations for the selected category. `categoryRecommendation()` builds category-level recommendations only for Apps, Developer, Documents, Caches and Trash; any other category is refused instead of being mapped to Caches. It computes estimates and duplicate groups from the complete measured category while bounding only displayed paths. Category verdicts use the neutral `review` state, not `unused`. `duplicateCandidates()` groups same-name, same-size files as possible duplicates using in-memory scan data. File contents are never read, hashed or compared.
 
 No path in this flow imports or calls a mutation provider.
 

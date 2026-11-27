@@ -156,7 +156,7 @@ export class Store {
 
   private enrich() {
     const { scan, listing, row } = this.state;
-    if (scan.phase !== "done" && this.state.stack.length === 0) return;
+    if (scan.phase !== "completed" && this.state.stack.length === 0) return;
     const all = this.allEntries().slice(0, MAX_ROWS);
     const missing = all.map((i) => i.path).filter((p) => !(p in this.state.usage) && !this.usagePending.has(p));
     if (missing.length > 0) {
@@ -258,10 +258,11 @@ export class Store {
       await before?.();
     } catch (error) {
       if (ticket === this.loads) {
+        const message = `Could not discover volumes: ${error instanceof Error ? error.message : String(error)}`;
         this.set({
           drives: [],
-          scan: { ...emptySnapshot(), phase: "done" },
-          note: `Could not discover volumes: ${error instanceof Error ? error.message : String(error)}`,
+          scan: { ...emptySnapshot(), phase: "failed", error: message },
+          note: message,
         });
       }
       return;
@@ -270,7 +271,10 @@ export class Store {
       const drive = this.state.drives[this.state.drive];
       if (ticket !== this.loads) return;
       if (!drive) {
-        this.set({ scan: { ...emptySnapshot(), phase: "done" }, note: "No accessible volumes were found." });
+        this.set({
+          scan: { ...emptySnapshot(), phase: "failed", error: "No accessible volumes were found." },
+          note: "No accessible volumes were found.",
+        });
         return;
       }
       const layout = this.options.demo ? demoLayout(drive) : await layoutFor(drive);
@@ -284,16 +288,23 @@ export class Store {
       const start = this.options.demo ? startDemoScan : startScan;
       const handle = start(layout, (scan) => {
         if (this.scanHandle !== handle) return;
-        if (scan.phase === "done") this.scans.set(drive.id, scan);
-        this.set({ scan });
+        if (scan.phase === "completed") this.scans.set(drive.id, scan);
+        const note =
+          scan.phase === "cancelled"
+            ? "Analysis cancelled; partial results are shown and category recommendations are unavailable."
+            : scan.phase === "failed"
+              ? `Analysis failed${scan.error ? `: ${scan.error}` : ""}. Partial results only.`
+              : this.state.note;
+        this.set({ scan, note });
       });
       this.scanHandle = handle;
     } catch (error) {
       if (ticket === this.loads) {
+        const message = `Could not inspect this volume: ${error instanceof Error ? error.message : String(error)}`;
         this.set({
           layout: null,
-          scan: { ...emptySnapshot(), phase: "done" },
-          note: `Could not inspect this volume: ${error instanceof Error ? error.message : String(error)}`,
+          scan: { ...emptySnapshot(), phase: "failed", error: message },
+          note: message,
         });
       }
     }
@@ -304,7 +315,7 @@ export class Store {
     if (action || drives.length < 2) return;
     const next = ((index % drives.length) + drives.length) % drives.length;
     if (next === drive) return;
-    if (this.state.scan.phase === "done") this.scans.set(drives[drive].id, this.state.scan);
+    if (this.state.scan.phase === "completed") this.scans.set(drives[drive].id, this.state.scan);
     this.stopWork();
     this.set({ drive: next, scan: emptySnapshot(), note: null, stack: [], children: [], listing: false, row: 0, pane: "sidebar", recommendation: null });
     void this.load();
@@ -490,16 +501,16 @@ export class Store {
     const recommendation = recommendationForItem(item, this.state.selected, this.label(item));
     this.set({
       recommendation,
-      note: `${recommendation.title} · ${size(recommendation.estimatedBytes)} estimated cleanup opportunity. Review it yourself; this app changes nothing.`,
+      note: `${recommendation.title} · ${size(recommendation.estimatedBytes)} measured for review. Review it yourself; this app changes nothing.`,
     });
   }
 
   canReview(id: CategoryId): id is ReviewCategory {
-    return isReviewCategory(id) && this.state.scan.phase === "done" && this.state.scan.sizes[id] >= WORTH_REVIEW;
+    return isReviewCategory(id) && this.state.scan.phase === "completed" && this.state.scan.sizes[id] >= WORTH_REVIEW;
   }
 
   suggestion(): ReviewCategory | null {
-    if (this.state.scan.phase !== "done") return null;
+    if (this.state.scan.phase !== "completed") return null;
     const candidates = REVIEW_CATEGORIES
       .filter((id) => this.state.scan.sizes[id] >= WORTH_REVIEW)
       .sort((a, b) => this.state.scan.sizes[b] - this.state.scan.sizes[a]);
@@ -508,8 +519,15 @@ export class Store {
 
   /** Prepare a recommendation for the requested supported category only. */
   async reviewCategory(id: CategoryId = this.state.selected) {
-    if (this.state.scan.phase !== "done") {
-      this.set({ note: "Wait for the storage analysis to finish before preparing recommendations.", recommendation: null });
+    const phase = this.state.scan.phase;
+    if (phase !== "completed") {
+      const reason =
+        phase === "cancelled"
+          ? "Analysis was cancelled; complete-category recommendations are unavailable."
+          : phase === "failed"
+            ? `Analysis failed${this.state.scan.error ? `: ${this.state.scan.error}` : ""}; complete-category recommendations are unavailable.`
+            : "Wait for the storage analysis to finish before preparing recommendations.";
+      this.set({ note: reason, recommendation: null });
       return;
     }
     if (!isReviewCategory(id)) {
@@ -520,7 +538,9 @@ export class Store {
       return;
     }
     const category = id;
-    const items = this.state.scan.items[category].slice(0, MAX_ROWS);
+    // Estimate and group over the complete measured category. Only displayed
+    // paths are bounded by categoryRecommendation().
+    const items = this.state.scan.items[category];
     if (items.length === 0) {
       this.set({ note: `${CATEGORY[category].name}: no measured items to review.`, recommendation: null });
       return;
@@ -530,7 +550,7 @@ export class Store {
       action: null,
       selected: category,
       recommendation,
-      note: `Estimated cleanup opportunity: ${size(recommendation.estimatedBytes)}. Recommendation only; this app changes nothing.`,
+      note: `Category storage estimate: ${size(recommendation.estimatedBytes)} measured storage to review. Informational only; this app changes nothing.`,
     });
   }
 
