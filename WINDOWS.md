@@ -2,7 +2,7 @@
 
 ## Support statement
 
-This port targets Windows 10 and Windows 11 on x64 with Node.js 20.11+. The implementation is **untested and unverified** at this stage. No claim is made that every drive type, terminal, cache location, permission case, or Recycle Bin operation works on a particular machine yet.
+This port targets Windows 10 and Windows 11 on x64 with Node.js 20.11+. The implementation is **untested and unverified** at this stage. No claim is made that every drive type, terminal, cache location, permission case, or Recycle Bin operation works on a particular machine yet. **Do not use the cleanup feature on real files until the validation matrix below has been completed.**
 
 Implemented statically:
 
@@ -28,6 +28,8 @@ Planned or not yet implemented:
 - Verified handling of every network, ReFS, exFAT, FAT32, BitLocker, VHD, and cloud-placeholder configuration
 - Windows-specific automated tests and CI test coverage
 - Cleanup from Windows services or headless hosts where the Windows Shell has no interactive user Recycle Bin context
+- A hard guarantee against a Shell bug that permanently deletes an item despite forced recycle flags: `PostDeleteItem` can detect a missing Recycle Bin destination but cannot restore an already completed deletion
+- Cleanup on network, optical, RAM, unknown, disabled-bin, or otherwise uncertain volume types; these cases are rejected before deletion
 
 ## Installation and setup
 
@@ -77,8 +79,9 @@ Cancellation stops scheduling further work. A large directory can still require 
 2. The app prepares the direct-child cache plan. The Recycle Bin itself is never a bulk-clear target.
 3. Review every exact selected path, the item count, and estimated bytes.
 4. Confirm again within 15 seconds. Navigation or timeout cancels the armed selection.
-5. The native bridge uses `IFileOperation` with `FOFX_RECYCLEONDELETE` and `FOFX_ADDUNDORECORD`. `PreDeleteItem` requires `TSF_DELETE_RECYCLE_IF_POSSIBLE`; `PostDeleteItem` requires a successful HRESULT, recycle flags, and a non-null Recycle Bin item.
-6. Successful and unsuccessful paths are recorded. Source disappearance alone never counts as success. Locked, denied, unavailable, cancelled, or unsupported items are not retried with another mechanism.
+5. Before any delete is queued, the native bridge resolves the path's actual volume mount, rejects unknown/network/optical/RAM drives, requires a working Recycle Bin there through `SHQueryRecycleBin`, checks that the volume is not configured with `NukeOnDelete`, and verifies that the Shell item still resolves to the exact confirmed path.
+6. `IFileOperation` uses `FOFX_RECYCLEONDELETE` and `FOFX_ADDUNDORECORD`. `PreDeleteItem` requires `TSF_DELETE_RECYCLE_IF_POSSIBLE`; `PostDeleteItem` requires one successful callback with recycle flags and a non-null Recycle Bin item; `FinishOperations` must also succeed with no aborted operations.
+7. Successful and unsuccessful paths are recorded. `PostDeleteItem` is confirmation, not rollback: if it fails, the source may already have been permanently deleted, and the user is told to inspect manually. Source disappearance alone never counts as success. No result is retried with another mechanism.
 
 Moving an item to the Recycle Bin does **not** reclaim its space. Windows still accounts for it until the user independently empties or restores items through Windows. This app has no empty-Recycle-Bin operation.
 
@@ -129,7 +132,7 @@ A separately requested test phase should cover, at minimum:
 5. Deep/long paths, Unicode, hidden/system attributes, sparse/compressed files, large files, junctions, symlinks, hard links, cloud placeholders, and files vanishing mid-scan.
 6. Cancellation and memory/I/O behavior on 512 GB, 1 TB, and 2 TB drives, large `node_modules`, game libraries, and developer caches.
 7. Permission denied, sharing locks, Controlled Folder Access, read-only media, Recycle Bin disabled/full, and user cancellation.
-8. Static and behavioral proof that every successful cleanup is restorable and that no failure triggers permanent deletion or Recycle Bin emptying.
+8. COM vtable/marshaling, callback evidence (`PreDeleteItem`, one `PostDeleteItem`, `FinishOperations`, abort state), Shell item path identity, volume/bin preflight, `NukeOnDelete`, fixed/removable/network volume handling, and proof that every successful cleanup is restorable while no failure triggers permanent deletion or Recycle Bin emptying.
 9. Exact confirmation plans, timeout/cancel behavior, nested-path batches, duplicate paths, and dry-run with filesystem snapshots proving no changes.
 10. Explorer paths with spaces/Unicode and inaccessible/missing items.
 11. Windows Terminal, PowerShell 5.1/7, Windows Console, keyboard navigation, resizing, Unicode, and non-English locales.

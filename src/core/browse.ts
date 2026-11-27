@@ -7,7 +7,7 @@ import { isWhole, type Usage } from "./classify";
 import { homeTrash, type Layout } from "./layout";
 import { IS_MAC, IS_WINDOWS, OS_NAME } from "./platform";
 import { windowsUsage } from "./windows/metadata";
-import { normalPath } from "./windows/paths";
+import { normalPath, windowsEntryKind } from "./windows/paths";
 import { cannotRemoveWindows } from "./windows/permissions";
 import { revealWindows } from "./windows/reveal";
 import { findWindowsCulprit } from "./windows/scan";
@@ -57,6 +57,10 @@ export function listFolder(
   const sorted = () => [...items].sort((a, b) => b.size - a.size);
 
   const run = async () => {
+    if (IS_WINDOWS && (await windowsEntryKind(path)) !== "directory") {
+      if (!cancelled) onUpdate([], true, "");
+      return;
+    }
     let entries;
     try {
       entries = await fsp.readdir(path, { withFileTypes: true });

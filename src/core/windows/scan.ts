@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isWhole } from "../classify";
 import type { Culprit } from "../browse";
 import type { Item } from "../scan";
-import { extendedPath } from "./paths";
+import { extendedPath, windowsEntryKind } from "./paths";
 
 export interface WindowsDuResult {
   bytes: number;
@@ -121,7 +121,7 @@ interface TreeNode {
  */
 async function culpritTree(path: string, depth: number, isCancelled: Cancelled, limiter: IoLimiter): Promise<TreeNode> {
   const empty: TreeNode = { path, bytes: 0, top: [] };
-  if (isCancelled() || depth < 0) return empty;
+  if (isCancelled() || depth < 0 || (await windowsEntryKind(path)) !== "directory") return empty;
   let entries;
   try {
     entries = await limiter.run(() => fsp.readdir(extendedPath(path), { withFileTypes: true }));

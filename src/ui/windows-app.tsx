@@ -8,7 +8,9 @@ import type { Item } from "../core/scan";
 import { diskSegments } from "./bar";
 import type { Store } from "./store";
 
-export type InkModule = typeof import("ink");
+// Ink is ESM while this package compiles as CommonJS. TypeScript requires an
+// explicit import resolution mode for a type-only reference in that case.
+export type InkModule = typeof import("ink", { with: { "resolution-mode": "import" } });
 
 const rgb = (color: Rgb) => `#${color.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 const pct = (part: number, whole: number) => `${whole > 0 ? Math.round((part / whole) * 100) : 0}%`;

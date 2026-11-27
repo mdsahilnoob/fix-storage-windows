@@ -10,6 +10,8 @@ Application code can call only `recycleWindows()` in `src/core/windows/trash.ts`
 
 `scripts/windows-recycle-bin.ps1` accepts UTF-8 JSON paths on stdin and compiles `scripts/RecycleBin.Native.cs` in memory. PowerShell runs with `-STA`; filenames never become script source. The C# bridge uses Windows `IFileOperation` directly, with no third-party trash package or Visual Basic FileIO dialog behavior.
 
+**Preflight before deletion:** the bridge resolves the path's actual volume mount with `GetVolumePathNameW`, rejects unknown, no-root, network, optical and RAM drives, requires `SHQueryRecycleBinW` to confirm a Recycle Bin for that volume, checks per-user and machine Recycle Bin policies for `NukeOnDelete`, and compares the Shell item's `SIGDN_FILESYSPATH` with the already confirmed path. If any check fails, no delete is queued and the item is untouched. This narrows, but does not make atomic, the validation-to-operation race.
+
 The operation flags are:
 
 - `FOFX_RECYCLEONDELETE`: recycle rather than permanently delete;
@@ -17,12 +19,15 @@ The operation flags are:
 - `FOFX_EARLYFAILURE`: stop on the first error;
 - `FOF_NOERRORUI`, `FOF_NOCONFIRMATION`, `FOF_SILENT`: suppress Shell UI while the callbacks—not a permanent-delete dialog—decide whether the outcome is acceptable.
 
-Flags alone are not treated as proof. `RecycleGuard` implements both callbacks:
+Flags alone are not treated as proof. `RecycleGuard` records callback evidence:
 
-1. `PreDeleteItem` returns `E_ABORT` unless `dwFlags` contains `TSF_DELETE_RECYCLE_IF_POSSIBLE`.
-2. `PostDeleteItem` requires a successful `hrDelete`, recycle flags, and a **non-null `psiNewlyCreated`**. Microsoft defines that pointer as the deleted item now in the Recycle Bin; full deletion supplies `NULL`.
+1. `PreDeleteItem` must be received with `TSF_DELETE_RECYCLE_IF_POSSIBLE`; otherwise it returns `E_ABORT` before deletion proceeds.
+2. `PostDeleteItem` must be received exactly once with a successful `hrDelete`, recycle flags and a **non-null `psiNewlyCreated`**. Microsoft defines that pointer as the deleted item now in the Recycle Bin; full deletion supplies `NULL`.
+3. `FinishOperations` must be received and succeed, with no aborted operations.
 
-An operation without that post-delete evidence is aborted and reported as failed for manual inspection. Node never infers recycling merely from `ENOENT`: success requires the native post-delete confirmation, no aborted operations, and a source-path check. Existing or unconfirmable sources are failures. No other deletion mechanism is attempted.
+`PostDeleteItem` is evidence, **not a rollback mechanism**: it runs after deletion. If it reports a missing destination, the source may already have been permanently deleted; the user is warned to inspect manually rather than being told the item was left untouched. Node never infers recycling merely from `ENOENT`: success requires all native confirmations, no aborted operations, and a source-path check. Existing or unconfirmable sources are failures. No other deletion mechanism is attempted.
+
+These controls make unsupported and uncertain volumes fail closed before deletion, but source code alone cannot prove that Windows will never violate forced recycle behavior because of an OS or Shell defect. Runtime validation of that guarantee remains required before real-file use.
 
 Microsoft references:
 
@@ -39,8 +44,10 @@ Runtime COM interop and Shell behavior remain unverified until the separately ap
 3. **Plan:** category cleanup enumerates direct children only and excludes nested roots and aliases.
 4. **Policy:** `cannotRemoveWindows()` uses absolute, case-insensitive containment and protected-tree checks.
 5. **Provider:** `validateWindowsRecycle()` repeats policy checks, rejects final links and canonical/ancestor aliases, and reruns policy on the canonical target.
-6. **Process boundary:** a fixed script and JSON stdin prevent filenames becoming PowerShell code.
-7. **Shell operation:** forced recycle plus pre-delete and post-delete recycle-only guards is mandatory; errors never invoke a fallback.
+6. **Traversal boundary:** a shared `windowsEntryKind()` guard runs before every top-level directory open in scanning, browsing, culprit discovery, cache planning and layout discovery; links are not entered.
+7. **Process boundary:** a fixed script and JSON stdin prevent filenames becoming PowerShell code.
+8. **Shell operation:** volume/bin preflight, exact Shell path identity, forced recycle, scoped volume types, and pre/post/finish recycle-only guards are mandatory; errors never invoke a fallback.
+9. **Positive accounting:** both the native provider and bulk cleaner require explicit moved-path evidence; absence from a failure list is not success.
 
 Both category and item paths invoke the same policy. This deliberately closes the original bulk-clean path's reliance on root construction alone.
 
@@ -70,6 +77,7 @@ The native policy protects volume roots and Windows/system-managed trees, includ
 - user profile roots and all measured root directories;
 - standard Documents, Desktop, Pictures, Videos, Music and Downloads roots;
 - other volumes, aliases, read-only volumes, and paths outside measured roots;
+- network, optical, RAM, unknown, disabled-bin and uncertain volume types before any delete is queued;
 - junctions and symbolic links immediately before mutation.
 
 Folder-mounted volumes use their actual mount root for these checks, not just the containing drive root. Canonical volume-GUID results are translated back through the selected mount before alias comparison. Personal descendants explicitly selected in a valid workflow are still Recycle Bin-only. Their presence in a category is not permission for automatic deletion.

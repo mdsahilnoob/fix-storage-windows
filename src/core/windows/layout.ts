@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Root } from "../categories";
 import type { Drive } from "../drives";
 import type { Layout } from "../layout";
-import { extendedPath, insidePath, normalPath, samePath } from "./paths";
+import { extendedPath, insidePath, normalPath, samePath, windowsEntryKind } from "./paths";
 
 const CACHE_NAMES = new Set(["cache", "code cache", "gpucache", "dawncache", "shadercache", "componentmodelcache"]);
 const GAME_FOLDERS = /^(steam|steamlibrary|epic games|epicgames|xbox|xboxgames|riot games|riot client|gog games|ea games|battle\.net)$/i;
@@ -24,6 +24,7 @@ function onDrive(path: string, drive: Drive): boolean {
 }
 
 async function directories(path: string): Promise<string[]> {
+  if ((await windowsEntryKind(path)) !== "directory") return [];
   try {
     return (await fsp.readdir(extendedPath(path), { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())

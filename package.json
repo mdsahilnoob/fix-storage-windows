@@ -40,8 +40,7 @@
     "demo": "tsc -p tsconfig.json && node bin/fix-storage.cjs --demo",
     "plain": "tsc -p tsconfig.json && node bin/fix-storage.cjs --plain",
     "typecheck": "tsc --noEmit",
-    "prepack": "npm run build",
-    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\""
+    "prepack": "npm run build"
   },
   "dependencies": {
     "ink": "^5.2.1",

@@ -5,7 +5,7 @@ import { CATEGORIES, type CategoryId, type Root } from "./categories";
 import type { Drive } from "./drives";
 import type { Layout } from "./layout";
 import { IS_MAC, IS_WINDOWS } from "./platform";
-import { extendedPath, normalPath } from "./windows/paths";
+import { extendedPath, normalPath, windowsEntryKind } from "./windows/paths";
 import { windowsDu } from "./windows/scan";
 
 export interface Item {
@@ -219,6 +219,21 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
 
     const expand = async (path: string, category: CategoryId, hidden?: CategoryId): Promise<void> => {
       if (cancelled) return;
+      if (IS_WINDOWS) {
+        const kind = await windowsEntryKind(path);
+        if (kind === "link") {
+          report(path, category);
+          return;
+        }
+        if (kind === "file") {
+          await addFile(path, category);
+          return;
+        }
+        if (kind === "missing") {
+          report(path, category);
+          return;
+        }
+      }
       let entries;
       try {
         entries = await fsp.readdir(IS_WINDOWS ? extendedPath(path) : path, { withFileTypes: true });

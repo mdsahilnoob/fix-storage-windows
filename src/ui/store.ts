@@ -810,7 +810,11 @@ export class Store {
           : "cleared (estimated)";
     const parts = [`${CATEGORY[id].name}: ${size(freed)} ${outcome}.`];
     if (IS_WINDOWS && !dryRun && !this.options.demo) parts.push("No disk space is reclaimed until you choose to empty the Recycle Bin in Windows.");
-    if (skipped > 0) parts.push(`${skipped} ${skipped === 1 ? "item was" : "items were"} in use or protected and left alone.`);
+    if (skipped > 0) parts.push(
+      IS_WINDOWS
+        ? `${skipped} ${skipped === 1 ? "item was" : "items were"} not confirmed as recycled; inspect the listed path manually.`
+        : `${skipped} ${skipped === 1 ? "item was" : "items were"} in use or protected and left alone.`,
+    );
     if (cleanupError) parts.push(`First error: ${cleanupError}`);
     this.set({
       scan: dryRun ? original : scan,

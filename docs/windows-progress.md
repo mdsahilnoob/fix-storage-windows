@@ -30,6 +30,21 @@ This document tracks implementation status. It is a static development record, n
 - Windows access time is not presented as a last-opened date.
 - `@zenbu-labs/pixel` has no Windows runtime; the Windows interactive view uses Ink and the existing application store.
 
+## Static-review repair pass
+
+- [x] Corrected the ESM type import required by the CommonJS/Node16 build.
+- [x] Removed unsupported `ChildProcess.destroy()` usage; all native-process settlement is now single-shot and stdin errors kill the child.
+- [x] Added native volume/bin preflight before any delete is queued.
+- [x] Added exact Shell path identity checks immediately before scheduling deletion.
+- [x] Required explicit pre-delete, single post-delete, finish, and no-abort evidence for success.
+- [x] Clarified that post-delete evidence is not rollback and warned when a source may already be gone.
+- [x] Added a common reparse-aware directory-entry guard before every top-level traversal entry point.
+- [x] Added positive moved-path accounting and bounded native-process stdout.
+- [x] Made long-path validation consistent and rejected unsupported volume types before cleanup.
+- [x] Removed the package's recursive build-directory deletion script to avoid any literal permanent-delete API in package configuration.
+
+None of these repairs has been built or executed.
+
 ## Outstanding validation
 
 All Windows functionality remains untested until a separately requested test phase. See `WINDOWS.md` for the validation matrix and known limitations.

@@ -26,12 +26,14 @@ interface ShellResult {
 }
 
 const SCRIPT = resolve(__dirname, "../../../scripts/windows-recycle-bin.ps1");
+/** Fail closed if a batch produces an implausibly large native result. */
+const MAX_STDOUT_BYTES = 16 * 1024 * 1024;
 
 /** The only low-level Windows cleanup provider; callers must use recycleWindows. */
 const windowsTrash: TrashProvider = {
   async moveToTrash(paths: string[]): Promise<TrashResult> {
     if (paths.length === 0) return { moved: [], failed: [] };
-    const results = await new Promise<ShellResult[]>((done, fail) => {
+    const results = await new Promise<ShellResult[]>((resolvePromise, rejectPromise) => {
       const child = spawn(
         "powershell.exe",
         ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-File", SCRIPT],
@@ -39,23 +41,44 @@ const windowsTrash: TrashProvider = {
       );
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        rejectPromise(error);
+      };
+      const resolveOnce = (value: ShellResult[]) => {
+        if (settled) return;
+        settled = true;
+        resolvePromise(value);
+      };
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (stdout.length > MAX_STDOUT_BYTES) {
+          child.kill();
+          rejectOnce(new Error("Windows Recycle Bin returned too much data. No fallback was attempted."));
+        }
+      });
       child.stderr.on("data", (chunk) => {
         if (stderr.length < 64 * 1024) stderr += chunk;
       });
-      child.on("error", fail);
+      child.on("error", rejectOnce);
       child.on("close", (code) => {
-        if (code !== 0) return fail(new Error(stderr.trim() || `Windows Recycle Bin operation exited with code ${code}. No fallback was attempted.`));
+        if (settled) return;
+        if (code !== 0) return rejectOnce(new Error(stderr.trim() || `Windows Recycle Bin operation exited with code ${code}. No fallback was attempted.`));
         try {
           const parsed = JSON.parse(stdout) as ShellResult[] | ShellResult;
-          done(Array.isArray(parsed) ? parsed : [parsed]);
+          resolveOnce(Array.isArray(parsed) ? parsed : [parsed]);
         } catch {
-          fail(new Error("Windows Recycle Bin returned an unreadable result. No fallback was attempted."));
+          rejectOnce(new Error("Windows Recycle Bin returned an unreadable result. No fallback was attempted."));
         }
       });
-      child.stdin.on("error", (error) => child.destroy(error));
+      child.stdin.on("error", (error) => {
+        child.kill();
+        rejectOnce(new Error(`Could not send cleanup paths to Windows: ${error.message}. No fallback was attempted.`));
+      });
       child.stdin.end(JSON.stringify(paths), "utf8");
     });
 

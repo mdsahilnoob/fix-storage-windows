@@ -32,7 +32,7 @@ Reused in the port:
 | Permanent caches/Trash deletion | Prohibited on Windows; all cleanup recycles and Recycle Bin clearing is disabled |
 | Original bulk clean skipped central removal guard | Both item and bulk paths call `cannotRemoveWindows` and provider validation |
 | Pixel-only renderer | Windows Ink renderer using the same Store; Pixel entry files preserved as reference but excluded from builds |
-| `rm -rf dist` | Node-based development clean script |
+| `rm -rf dist` | Build script removed from the Windows package; no recursive deletion API in package configuration |
 
 ## CLI compatibility
 

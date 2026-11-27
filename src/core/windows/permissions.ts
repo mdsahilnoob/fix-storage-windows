@@ -48,6 +48,10 @@ function protectedRoots(layout: Layout): string[] {
 export function cannotRemoveWindows(path: string, layout: Layout): string | null {
   if (!isAbsolute(path)) return "Not an absolute Windows path.";
   if (layout.lookOnly) return layout.lookOnly;
+  const driveType = layout.drive.driveType?.toLowerCase();
+  if (!driveType || !["fixed", "removable"].includes(driveType)) {
+    return "The Recycle Bin is not verified for this volume type; cleanup is disabled here.";
+  }
   const target = resolve(path);
   if (isDriveRoot(target)) return "A volume root cannot be moved to the Recycle Bin.";
   if (protectedTrees(layout).some((folder) => atOrInside(target, folder))) {
@@ -87,7 +91,7 @@ export async function validateWindowsRecycle(path: string, layout: Layout): Prom
   if (stat.isSymbolicLink()) throw new Error("Junctions and symbolic links are not cleanup candidates; the item was left untouched.");
   let canonical: string;
   try {
-    canonical = await fsp.realpath(path);
+    canonical = await fsp.realpath(extendedPath(path));
   } catch (error) {
     throw new Error(`Cannot resolve ${path} safely: ${(error as Error).message}`);
   }

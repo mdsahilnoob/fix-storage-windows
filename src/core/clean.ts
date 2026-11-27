@@ -5,7 +5,7 @@ import type { Layout } from "./layout";
 import { IS_MAC, IS_WINDOWS } from "./platform";
 import { cannotRemove } from "./browse";
 import { recycleWindows, type TrashResult } from "./windows/trash";
-import { extendedPath, normalPath } from "./windows/paths";
+import { extendedPath, normalPath, windowsEntryKind } from "./windows/paths";
 import { windowsDu } from "./windows/scan";
 import type { Item } from "./scan";
 import { forgetTrashInfo } from "./trash";
@@ -49,6 +49,7 @@ export async function plan(category: Clearable, known: Item[], layout: Layout): 
   const items: Item[] = [];
   for (const root of all) {
     if (root.category !== category) continue;
+    if (IS_WINDOWS && (await windowsEntryKind(root.path)) !== "directory") continue;
     let names: string[];
     try {
       names = await fsp.readdir(root.path);
@@ -144,8 +145,12 @@ async function cleanWindows(category: Clearable, items: Item[], layout: Layout, 
     return result;
   }
   const failed = new Map(recycled.failed.map((failure) => [normalPath(failure.path), failure.error]));
+  // Positive evidence only: an item is successful if the provider explicitly
+  // reported it as moved, not merely because it is absent from the failure map.
+  const moved = new Set(recycled.moved.map((path) => normalPath(path)));
   for (const item of allowed) {
-    const error = failed.get(normalPath(item.path));
+    const key = normalPath(item.path);
+    const error = failed.get(key) ?? (moved.has(key) ? undefined : "Windows did not confirm this item was recycled.");
     if (error) {
       result.skipped.push(item.path);
       result.errors?.push({ path: item.path, error });

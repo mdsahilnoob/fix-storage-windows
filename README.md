@@ -2,7 +2,7 @@
 
 A native Windows port of [fix-storage](https://github.com/govijr/fix-storage), for inspecting disk usage and moving explicitly confirmed cleanup candidates to the **Windows Recycle Bin**.
 
-> **Development status:** the Windows implementation is present but has not been tested or verified. No tests, benchmarks, deletion experiments, or automated verification were run during this porting phase. See [WINDOWS.md](WINDOWS.md) for limitations and the outstanding validation matrix.
+> **Development status:** the Windows implementation is present but has not been tested or verified. No tests, benchmarks, deletion experiments, or automated verification were run during this porting phase. **Do not use cleanup on real files yet.** See [WINDOWS.md](WINDOWS.md) for limitations and the outstanding validation matrix.
 
 ## Safety model
 

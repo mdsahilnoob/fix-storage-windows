@@ -39,6 +39,23 @@ export function extendedPath(path: string): string {
   return `\\\\?\\${full}`;
 }
 
+export type WindowsEntryKind = "directory" | "file" | "link" | "missing";
+
+/**
+ * Examines the entry itself before a caller opens it as a directory. Junctions
+ * and symbolic links are reported as links so they are never traversed.
+ */
+export async function windowsEntryKind(path: string): Promise<WindowsEntryKind> {
+  try {
+    const stat = await fsp.lstat(extendedPath(path));
+    if (stat.isSymbolicLink()) return "link";
+    if (stat.isDirectory()) return "directory";
+    return "file";
+  } catch {
+    return "missing";
+  }
+}
+
 export async function pathExists(path: string): Promise<boolean> {
   try {
     await fsp.lstat(extendedPath(path));
