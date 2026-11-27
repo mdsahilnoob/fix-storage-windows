@@ -1,0 +1,28 @@
+name: Junk pattern
+description: Something big that fix-storage should recognise
+labels: [classifier]
+body:
+  - type: input
+    id: path
+    attributes:
+      label: Path
+      placeholder: C:\Users\you\AppData\Local\Example\Cache
+    validations:
+      required: true
+  - type: dropdown
+    id: label
+    attributes:
+      label: What should it be labelled?
+      options:
+        - junk (rebuilds itself or is a leftover)
+        - unused (probably not needed, your call)
+        - system (a tool manages it; say which command cleans it)
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is that safe?
+      description: How is it regenerated, or which tool owns it? Links to docs help.
+    validations:
+      required: true

@@ -1,0 +1,64 @@
+{
+  "name": "fix-storage-windows",
+  "version": "0.1.0",
+  "description": "Native Windows 10 and 11 disk analysis and restore-friendly Recycle Bin cleanup from the terminal.",
+  "keywords": [
+    "windows",
+    "windows-10",
+    "windows-11",
+    "disk",
+    "storage",
+    "disk-usage",
+    "cleanup",
+    "recycle-bin",
+    "cache",
+    "tui",
+    "terminal",
+    "cli",
+    "node_modules"
+  ],
+  "homepage": "https://github.com/govijr/fix-storage#readme",
+  "license": "MIT",
+  "author": "the fix-storage authors",
+  "main": "dist/main-windows.js",
+  "bin": {
+    "fix-storage": "bin/fix-storage.cjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "scripts",
+    "README.md",
+    "WINDOWS.md",
+    "docs",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "tsc -p tsconfig.json && node bin/fix-storage.cjs",
+    "demo": "tsc -p tsconfig.json && node bin/fix-storage.cjs --demo",
+    "plain": "tsc -p tsconfig.json && node bin/fix-storage.cjs --plain",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\""
+  },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^18.3.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ]
+}

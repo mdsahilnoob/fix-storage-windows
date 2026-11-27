@@ -1,0 +1,47 @@
+name: Bug report
+description: Something is wrong or broken
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If fix-storage deleted or moved something it shouldn't have, please report it privately instead: see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      placeholder: fix-storage --dry-run
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: fix-storage version
+      description: The version in package.json, or `node -p "require('./package.json').version"` from the source directory
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version and architecture
+      description: Include the output of `fix-storage --drives` if it is about drives; redact personal volume labels.
+      placeholder: Windows 11 24H2, x64
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      placeholder: Windows Terminal 1.22, PowerShell 7.5 / Windows Console, PowerShell 5.1
+  - type: textarea
+    id: output
+    attributes:
+      label: Screenshot or output
+      description: A screenshot of the interface, or the output of `fix-storage --plain`.

@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check the tag matches package.json
+        shell: pwsh
+        run: |
+          $version = node -p 'require("./package.json").version'
+          if ("v$version" -ne "$env:GITHUB_REF_NAME") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package.json version $version"
+          }
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          npm pack
+          $package = Get-ChildItem -LiteralPath . -Filter 'fix-storage-windows-*.tgz' | Select-Object -First 1
+          Move-Item -LiteralPath $package.FullName -Destination 'fix-storage-windows.tgz'
+          $hash = (Get-FileHash -LiteralPath 'fix-storage-windows.tgz' -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath 'fix-storage-windows.tgz.sha256' -Value "$hash  fix-storage-windows.tgz" -NoNewline
+
+      - name: Release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $lines = Get-Content -LiteralPath 'CHANGELOG.md'
+          $start = [Array]::FindIndex($lines, [Predicate[string]] { param($line) $line -eq "## [$version]" })
+          $notes = if ($start -ge 0) { $lines[($start + 1)..($lines.Length - 1)] } else { @() }
+          $end = [Array]::FindIndex($notes, [Predicate[string]] { param($line) $line -match '^## \[' })
+          if ($end -ge 0) { $notes = $notes[0..($end - 1)] }
+          if ($notes.Count -eq 0) { $notes = @('See CHANGELOG.md.') }
+          $notes | Set-Content -LiteralPath 'notes.md'
+          @'
+
+          ### Install or update (PowerShell)
+
+          Download `fix-storage-windows.tgz` and `fix-storage-windows.tgz.sha256` from this release. Compare the published SHA-256 with `(Get-FileHash .\fix-storage-windows.tgz -Algorithm SHA256).Hash`, then run:
+
+          ```powershell
+          npm install --global .\fix-storage-windows.tgz
+          fix-storage --help
+          ```
+
+          The Windows port targets Windows 10/11 x64 and Node.js 20.11+. Review WINDOWS.md for current validation status.
+          '@ | Add-Content -LiteralPath 'notes.md'
+
+      - name: Publish the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" fix-storage-windows.tgz fix-storage-windows.tgz.sha256 --title "fix-storage-windows $env:GITHUB_REF_NAME" --notes-file notes.md
