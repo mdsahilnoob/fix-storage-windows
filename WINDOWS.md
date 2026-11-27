@@ -28,8 +28,10 @@ Planned or not yet implemented:
 - Verified handling of every network, ReFS, exFAT, FAT32, BitLocker, VHD, and cloud-placeholder configuration
 - Windows-specific automated tests and CI test coverage
 - Cleanup from Windows services or headless hosts where the Windows Shell has no interactive user Recycle Bin context
-- A hard guarantee against a Shell bug that permanently deletes an item despite forced recycle flags: `PostDeleteItem` can detect a missing Recycle Bin destination but cannot restore an already completed deletion
+- A hard guarantee against a Shell bug or full/misconfigured Recycle Bin that permanently deletes an item despite forced recycle flags: preflight confirms bin existence but not reliable quota/max-file-size safety, and `PostDeleteItem` cannot restore an already completed deletion
 - Cleanup on network, optical, RAM, unknown, disabled-bin, or otherwise uncertain volume types; these cases are rejected before deletion
+- Managed COM callback querying/invocation and LPWStr marshaling, which are statically corrected but require Windows runtime proof
+- Native ancestor reparse handling with folder mounts, junctions, symlinks and uncommon reparse tags, which requires runtime validation
 
 ## Installation and setup
 
@@ -81,11 +83,12 @@ Cancellation stops scheduling further work. A large directory can still require 
 4. Confirm again within 15 seconds. Navigation or timeout cancels the armed selection.
 5. Before any delete is queued, `GetVolumePathNameW` must resolve the actual mount point (no drive-letter fallback), `GetVolumeNameForVolumeMountPointW` must yield the brace-delimited volume GUID, unsupported volume types are rejected, `SHQueryRecycleBin` must confirm a bin, per-volume `NukeOnDelete`, global `NoRecycleFiles`, and legacy BitBucket settings must be verified or absent by default, and both the Shell path and NTFS volume-serial/file-index identity must match the confirmed target. A reparse-point attribute from the native file handle stops cleanup.
 6. `IFileOperation` uses `FOFX_RECYCLEONDELETE` and `FOFX_ADDUNDORECORD`. `PreDeleteItem` requires `TSF_DELETE_RECYCLE_IF_POSSIBLE`; `PostDeleteItem` requires one successful callback with recycle flags and a non-null Recycle Bin item; `FinishOperations` must also succeed with no aborted operations.
-7. Successful and unsuccessful paths are recorded. `PostDeleteItem` is confirmation, not rollback: if it fails, the source may already have been permanently deleted, and the user is told to inspect manually. Source disappearance alone never counts as success. No result is retried with another mechanism.
+7. Successful, failed and unknown paths are recorded separately. `PostDeleteItem` is confirmation, not rollback: if it fails, the source may already have been permanently deleted, and the user is told to inspect manually. Source disappearance alone never counts as success. No result is retried with another mechanism.
+8. Native batches have a configurable timeout and support cancellation. Timeout or cancellation after a batch starts is `unknown`, not a definite failure; Shell may have processed it. Cancellation before start performs no operation.
 
 Moving an item to the Recycle Bin does **not** reclaim its space. Windows still accounts for it until the user independently empties or restores items through Windows. This app has no empty-Recycle-Bin operation.
 
-Accounting is reported in two separate fields: `movedToRecycleBinBytes` is the estimated logical size of items moved, while `freed` is derived only from a fresh filesystem measurement after cleanup and is normally zero until Windows empties the bin. The UI shows both session values; `removed` counts successfully recycled items rather than permanent deletions.
+Accounting is reported in two separate fields: `movedToRecycleBinBytes` is the estimated logical size of items moved, while `freed` is the **net free-space increase observed** across a fresh before/after disk-space measurement and is not attributed solely to this app. Concurrent writes or deletions can affect that delta. The UI shows both session values; `removed` counts successfully recycled items rather than permanent deletions. Unknown native outcomes are reported separately and require manual inspection; they are never retried or inferred from source disappearance.
 
 `--dry-run` scans real storage but never invokes recycling. `--demo` uses synthetic paths and data and does not scan real storage. Read-only reports never clean anything.
 
@@ -134,10 +137,11 @@ A separately requested test phase should cover, at minimum:
 5. Deep/long paths, Unicode, hidden/system attributes, sparse/compressed files, large files, junctions, symlinks, hard links, cloud placeholders, and files vanishing mid-scan.
 6. Cancellation and memory/I/O behavior on 512 GB, 1 TB, and 2 TB drives, large `node_modules`, game libraries, and developer caches.
 7. Permission denied, sharing locks, Controlled Folder Access, read-only media, Recycle Bin disabled/full, and user cancellation.
-8. COM vtable/marshaling, callback evidence (`PreDeleteItem`, one `PostDeleteItem`, `FinishOperations`, abort state), Shell item path identity, volume/bin preflight, `NukeOnDelete`, fixed/removable/network volume handling, and proof that every successful cleanup is restorable while no failure triggers permanent deletion or Recycle Bin emptying.
-9. Exact confirmation plans, timeout/cancel behavior, nested-path batches, duplicate paths, and dry-run with filesystem snapshots proving no changes.
-10. Explorer paths with spaces/Unicode and inaccessible/missing items.
-11. Windows Terminal, PowerShell 5.1/7, Windows Console, keyboard navigation, resizing, Unicode, and non-English locales.
+8. Managed COM sink querying/invocation, LPWStr callback marshaling, callback evidence (`PreDeleteItem`, one `PostDeleteItem`, `FinishOperations`, abort state), Shell item path/file identity, native ancestor reparse checks with legitimate folder mounts, volume/bin preflight, `NukeOnDelete`, fixed/removable/network volume handling, and proof that every successful cleanup is restorable while no failure triggers permanent deletion or Recycle Bin emptying.
+9. Oversized batches and incomplete/malformed native output must produce `unknown` outcomes, never silent success or ordinary failure; unknown paths must remain visible and require inspection.
+10. Exact confirmation plans, timeout/cancel behavior, nested-path batches, duplicate paths, and dry-run with filesystem snapshots proving no changes.
+11. Explorer paths with spaces/Unicode and inaccessible/missing items.
+12. Windows Terminal, PowerShell 5.1/7, Windows Console, keyboard navigation, resizing, Unicode, and non-English locales.
 
 None of these checks has been performed in this development phase.
 

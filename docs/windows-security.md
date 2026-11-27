@@ -20,7 +20,7 @@ Application code can call only `recycleWindows()` in `src/core/windows/trash.ts`
 
 A missing key or value is the documented default (recycling enabled). An unreadable key, malformed value type, unexpected value, or failure to resolve the volume GUID is an **unverified state** and stops cleanup before any Shell operation.
 
-**File identity:** the bridge opens the target with `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`, rejects any `FILE_ATTRIBUTE_REPARSE_POINT`, and records the NTFS volume serial plus 64-bit file index. After resolving the Shell item, its `SIGDN_FILESYSPATH` must match the confirmed path and its file identity must match again. A mismatch cancels the operation. This is a best-effort narrowing of the time-of-check/time-of-use gap, not an atomic guarantee.
+**File identity:** the bridge opens the target with `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`, rejects any `FILE_ATTRIBUTE_REPARSE_POINT`, and records the NTFS volume serial plus 64-bit file index. After resolving the Shell item, its `SIGDN_FILESYSPATH` must match the confirmed path and its file identity must match again. Ancestor directories are also opened with the same native handle flags and rejected when they carry `FILE_ATTRIBUTE_REPARSE_POINT`; only the exact resolved volume mount point is allowed as a legitimate reparse root. A mismatch cancels the operation. This is a best-effort narrowing of the time-of-check/time-of-use gap, not an atomic guarantee.
 
 The operation flags are:
 
@@ -36,6 +36,14 @@ Flags alone are not treated as proof. `RecycleGuard` records callback evidence:
 3. `FinishOperations` must be received and succeed, with no aborted operations.
 
 `PostDeleteItem` is evidence, **not a rollback mechanism**: it runs after deletion. If it reports a missing destination, the source may already have been permanently deleted; the user is warned to inspect manually rather than being told the item was left untouched. Node never infers recycling merely from `ENOENT`: success requires all native confirmations, no aborted operations, and a source-path check. Existing or unconfirmable sources are failures. No other deletion mechanism is attempted.
+
+`IFileOperation` and `IShellItem` remain `[ComImport]` because they wrap Windows COM objects. `IFileOperationProgressSink` is implemented by the managed `RecycleGuard`, so it is defined with the COM GUID and `InterfaceIsIUnknown` but **without** `[ComImport]`. All native wide-string callback parameters use `UnmanagedType.LPWStr` instead of default BSTR marshaling. Shell querying and invocation of the managed callback still require runtime proof.
+
+Native requests are processed in bounded batches. `IFileOperation.DeleteItem` now receives the sink typed as `IFileOperationProgressSink`, not as generic `object`, while the managed sink interface itself remains free of `[ComImport]`. Each batch has a configurable timeout and supports abort cancellation; timeout or cancellation after the child process starts marks the batch `unknown` because Shell may already have processed it. Cancellation before start is a definite failure with no operation submitted.
+
+Incomplete, malformed, duplicate, contradictory or oversized results mark the affected paths as `unknown`; these are never treated as normal misses, never inferred from source disappearance, and never retried. The UI reports unknown outcomes separately and requires manual inspection.
+
+`SHQueryRecycleBinW` only confirms that a Recycle Bin exists for the volume. The bridge does not reliably preflight the Recycle Bin maximum file size, current quota consumption or full-bin behavior. If the Shell cannot recycle an item, forced recycle flags and callback evidence are detection mechanisms, not rollback. The application never knowingly selects permanent deletion and never retries with another API, but source code alone cannot guarantee Shell behavior under a full or misconfigured bin.
 
 These controls make unsupported and uncertain volumes fail closed before deletion, but source code alone cannot prove that Windows will never violate forced recycle behavior because of an OS or Shell defect. Runtime validation of that guarantee remains required before real-file use.
 
@@ -57,7 +65,7 @@ Runtime COM interop and Shell behavior remain unverified until the separately ap
 3. **Plan:** category cleanup enumerates direct children only and excludes nested roots and aliases.
 4. **Policy:** `cannotRemoveWindows()` uses absolute, case-insensitive containment and protected-tree checks.
 5. **Provider:** `validateWindowsRecycle()` repeats policy checks, rejects final links and canonical/ancestor aliases, and reruns policy on the canonical target.
-6. **Traversal boundary:** a shared `windowsEntryKind()` guard runs before every top-level directory open in scanning, browsing, culprit discovery, cache planning and layout discovery; Node-reported links/junctions are not entered. Node does not expose every Windows reparse tag, so non-symlink reparse directories encountered deep in a scan remain a documented limitation; every path selected for cleanup is checked by a native file handle for the reparse attribute before deletion.
+6. **Traversal boundary:** a shared `windowsEntryKind()` guard runs before every top-level directory open in scanning, browsing, culprit discovery, cache planning and layout discovery; Node-reported links/junctions are not entered. Node does not expose every Windows reparse tag, so non-symlink reparse directories encountered deep in a scan remain a documented limitation; every path selected for cleanup and its ancestor chain are checked by native file handles for the reparse attribute before deletion, allowing only the resolved volume mount point.
 7. **Process boundary:** a fixed script and JSON stdin prevent filenames becoming PowerShell code.
 8. **Shell operation:** volume/bin preflight, exact Shell path identity, forced recycle, scoped volume types, and pre/post/finish recycle-only guards are mandatory; errors never invoke a fallback.
 9. **Positive accounting:** both the native provider and bulk cleaner require explicit moved-path evidence; absence from a failure list is not success.
@@ -78,7 +86,7 @@ A matching second keypress within 15 seconds is required. Preparing a category p
 
 ## Accounting rule
 
-`freed` means bytes actually reclaimed and is derived only from a fresh `statfs`/disk-space measurement after cleanup. Logical bytes moved into the Recycle Bin are reported separately as `movedToRecycleBinBytes`; they are not added to `freed`. The count `removed` means successfully recycled items, not permanent removals. On Windows, cleanup normally reports reclaimed bytes of zero until the user empties the Recycle Bin through Windows.
+`freed` is the **net free-space increase observed** across fresh before/after disk-space measurements; concurrent activity can contribute, so it is not an attribution to this application. Logical bytes moved into the Recycle Bin are reported separately as `movedToRecycleBinBytes`; they are not added to `freed`. The count `removed` means successfully recycled items, not permanent removals. On Windows, the observed net increase is normally zero until the user empties the Recycle Bin through Windows.
 
 ## Dry-run and demo
 
@@ -101,7 +109,7 @@ Folder-mounted volumes use their actual mount root for these checks, not just th
 
 ## Error handling
 
-Access denial, sharing locks, read-only media, disabled/full Recycle Bin settings, unsupported network locations, missing paths, Shell cancellation, bridge startup failures and unsuccessful source confirmation all produce failure rather than another deletion attempt. Results are reconciled per submitted path; a path without affirmative native recycle evidence is treated as failed.
+Access denial, sharing locks, read-only media, disabled/full Recycle Bin settings, unsupported network locations, missing paths and bridge startup failures before execution produce definite failures. Shell cancellation, timeout after execution begins, incomplete output and unsuccessful source confirmation produce `unknown` outcomes. Results are reconciled per submitted path: `moved` requires affirmative recycle evidence, `failed` is a definite non-success, and `unknown` requires manual inspection. None of these outcomes triggers another deletion attempt.
 
 Shell operations are not transactions. Windows may handle some objects before another object fails, so a later rescan is required for exact state. Failed bulk items remain visible in the UI. No code attempts to roll back through permanent deletion.
 

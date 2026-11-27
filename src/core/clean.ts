@@ -15,7 +15,7 @@ export type Clearable = Extract<CategoryId, "caches" | "trash">;
 export interface CleanProgress {
   /** Path that was just handled. */
   path: string;
-  /** Bytes actually reclaimed; always 0 for Recycle Bin moves. */
+  /** Observed net free-space bytes; 0 for Recycle Bin moves. */
   freed: number;
   /** Estimated logical bytes moved into the Windows Recycle Bin. */
   movedToRecycleBinBytes?: number;
@@ -27,8 +27,15 @@ export interface CleanOptions {
   onProgress?: (progress: CleanProgress) => void;
 }
 
+/** A definite failure is distinct from an outcome that cannot be established. */
+export interface CleanIssue {
+  path: string;
+  error: string;
+  outcome: "failed" | "unknown";
+}
+
 export interface CleanResult {
-  /** Bytes actually reclaimed, from a fresh filesystem measurement. */
+  /** Net free-space increase observed from fresh filesystem measurements; not attributed solely to this app. */
   freed: number;
   /** Estimated logical bytes placed in the Windows Recycle Bin; no space reclaimed yet. */
   movedToRecycleBinBytes: number;
@@ -36,8 +43,10 @@ export interface CleanResult {
   removed: number;
   /** Paths that could not be removed (in use, or protected by the system). */
   skipped: string[];
-  /** Windows error details, when recycling could not be completed. */
-  errors?: Array<{ path: string; error: string }>;
+  /** Paths whose native outcome could not be established; require inspection. */
+  unknown: string[];
+  /** Windows error details, tagged as a definite failure or an unknown outcome. */
+  errors?: CleanIssue[];
 }
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -96,7 +105,7 @@ function inside(category: Clearable, path: string, layout: Layout): boolean {
 
 export async function clean(category: Clearable, items: Item[], layout: Layout, options: CleanOptions = {}): Promise<CleanResult> {
   if (IS_WINDOWS && !options.dryRun) return cleanWindows(category, items, layout, options);
-  const result: CleanResult = { freed: 0, movedToRecycleBinBytes: 0, removed: 0, skipped: [] };
+  const result: CleanResult = { freed: 0, movedToRecycleBinBytes: 0, removed: 0, skipped: [], unknown: [] };
 
   for (const item of items) {
     let freed = 0;
@@ -132,13 +141,13 @@ export async function clean(category: Clearable, items: Item[], layout: Layout, 
 
 /** Windows bulk cleanup has one Recycle Bin provider and no permanent-delete branch. */
 async function cleanWindows(category: Clearable, items: Item[], layout: Layout, options: CleanOptions): Promise<CleanResult> {
-  const result: CleanResult = { freed: 0, movedToRecycleBinBytes: 0, removed: 0, skipped: [], errors: [] };
+  const result: CleanResult = { freed: 0, movedToRecycleBinBytes: 0, removed: 0, skipped: [], unknown: [], errors: [] };
   const allowed: Item[] = [];
   for (const item of items) {
     const reason = layout.lookOnly || !inside(category, item.path, layout) || layout.foreign(item.path) ? "Outside the permitted cleanup roots." : cannotRemove(item.path, layout);
     if (reason) {
       result.skipped.push(item.path);
-      result.errors?.push({ path: item.path, error: reason });
+      result.errors?.push({ path: item.path, error: reason, outcome: "failed" });
       options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
     } else allowed.push(item);
   }
@@ -147,24 +156,32 @@ async function cleanWindows(category: Clearable, items: Item[], layout: Layout, 
   try {
     recycled = await recycleWindows(allowed.map((item) => item.path), layout);
   } catch (error) {
+    // The native process may have completed operations before any IPC failure.
     const message = error instanceof Error ? error.message : String(error);
     for (const item of allowed) {
-      result.skipped.push(item.path);
-      result.errors?.push({ path: item.path, error: message });
+      result.unknown.push(item.path);
+      result.errors?.push({ path: item.path, error: `${message} Manual inspection is required.`, outcome: "unknown" });
       options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
     }
     return result;
   }
   const failed = new Map(recycled.failed.map((failure) => [normalPath(failure.path), failure.error]));
+  for (const item of recycled.unknown) {
+    result.unknown.push(item.path);
+    result.errors?.push({ path: item.path, error: item.error, outcome: "unknown" });
+    options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
+  }
+  const unknownPaths = new Set(result.unknown.map((path) => normalPath(path)));
   // Positive evidence only: an item is successful if the provider explicitly
   // reported it as moved, not merely because it is absent from the failure map.
   const moved = new Set(recycled.moved.map((path) => normalPath(path)));
   for (const item of allowed) {
     const key = normalPath(item.path);
+    if (unknownPaths.has(key)) continue;
     const error = failed.get(key) ?? (moved.has(key) ? undefined : "Windows did not confirm this item was recycled.");
     if (error) {
       result.skipped.push(item.path);
-      result.errors?.push({ path: item.path, error });
+      result.errors?.push({ path: item.path, error, outcome: "failed" });
       options.onProgress?.({ path: item.path, freed: 0, movedToRecycleBinBytes: 0 });
     } else {
       result.movedToRecycleBinBytes += item.size;

@@ -30,30 +30,33 @@ namespace FixStorage
         [PreserveSig] int CopyItems(IntPtr items, IntPtr destination);
         [PreserveSig] int DeleteItem(
             [MarshalAs(UnmanagedType.Interface)] object item,
-            [MarshalAs(UnmanagedType.Interface)] object sink);
+            [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink sink);
         [PreserveSig] int DeleteItems(IntPtr items);
         [PreserveSig] int NewItem(IntPtr destination, uint attributes, IntPtr name, IntPtr template, IntPtr sink);
         [PreserveSig] int PerformOperations();
         [PreserveSig] int GetAnyOperationsAborted([MarshalAs(UnmanagedType.Bool)] out bool aborted);
     }
 
-    [ComImport]
+    // This interface is implemented by the managed RecycleGuard and exposed to
+    // Windows. It therefore must NOT be [ComImport]; consuming interfaces above
+    // retain that attribute. The GUID/interface type still define the COM IID.
+    [ComVisible(true)]
     [Guid("04B0F1A7-9490-44BC-96E1-4296A31252E2")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IFileOperationProgressSink
     {
         [PreserveSig] int StartOperations();
         [PreserveSig] int FinishOperations(int result);
-        [PreserveSig] int PreRenameItem(uint flags, IntPtr item, string newName);
-        [PreserveSig] int PostRenameItem(uint flags, IntPtr item, string newName, int result, IntPtr newlyCreated);
-        [PreserveSig] int PreMoveItem(uint flags, IntPtr item, IntPtr destination, string newName);
-        [PreserveSig] int PostMoveItem(uint flags, IntPtr item, IntPtr destination, string newName, int result, IntPtr newlyCreated);
-        [PreserveSig] int PreCopyItem(uint flags, IntPtr item, IntPtr destination, string newName);
-        [PreserveSig] int PostCopyItem(uint flags, IntPtr item, IntPtr destination, string newName, int result, IntPtr newlyCreated);
+        [PreserveSig] int PreRenameItem(uint flags, IntPtr item, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+        [PreserveSig] int PostRenameItem(uint flags, IntPtr item, [MarshalAs(UnmanagedType.LPWStr)] string newName, int result, IntPtr newlyCreated);
+        [PreserveSig] int PreMoveItem(uint flags, IntPtr item, IntPtr destination, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+        [PreserveSig] int PostMoveItem(uint flags, IntPtr item, IntPtr destination, [MarshalAs(UnmanagedType.LPWStr)] string newName, int result, IntPtr newlyCreated);
+        [PreserveSig] int PreCopyItem(uint flags, IntPtr item, IntPtr destination, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+        [PreserveSig] int PostCopyItem(uint flags, IntPtr item, IntPtr destination, [MarshalAs(UnmanagedType.LPWStr)] string newName, int result, IntPtr newlyCreated);
         [PreserveSig] int PreDeleteItem(uint flags, IntPtr item);
         [PreserveSig] int PostDeleteItem(uint flags, IntPtr item, int result, IntPtr newlyCreated);
-        [PreserveSig] int PreNewItem(uint flags, IntPtr destination, string newName, string templateName);
-        [PreserveSig] int PostNewItem(uint flags, IntPtr destination, string newName, string templateName, uint attributes, int result, IntPtr newItem);
+        [PreserveSig] int PreNewItem(uint flags, IntPtr destination, [MarshalAs(UnmanagedType.LPWStr)] string newName, [MarshalAs(UnmanagedType.LPWStr)] string templateName);
+        [PreserveSig] int PostNewItem(uint flags, IntPtr destination, [MarshalAs(UnmanagedType.LPWStr)] string newName, [MarshalAs(UnmanagedType.LPWStr)] string templateName, uint attributes, int result, IntPtr newItem);
         [PreserveSig] int UpdateProgress(uint total, uint completed);
         [PreserveSig] int ResetTimer();
         [PreserveSig] int PauseTimer();
@@ -204,6 +207,7 @@ namespace FixStorage
         private const uint FileAttributeReparsePoint = 0x00000400;
         private const uint FileFlagBackupSemantics = 0x02000000;
         private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileReadAttributes = 0x00000080;
         private const uint FileShareAll = 0x00000007;
         private const uint OpenExisting = 3;
         private static readonly IntPtr InvalidHandle = new IntPtr(-1);
@@ -364,7 +368,7 @@ namespace FixStorage
                 throw new InvalidOperationException("Legacy settings disable the Recycle Bin; no delete was scheduled.");
         }
 
-        private static void Preflight(string fullPath)
+        private static string Preflight(string fullPath)
         {
             StringBuilder mountBuilder = new StringBuilder(1024);
             if (!GetVolumePathNameW(fullPath, mountBuilder, (uint)mountBuilder.Capacity))
@@ -384,14 +388,56 @@ namespace FixStorage
             info.cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO));
             Check(SHQueryRecycleBinW(mount, ref info), "Checking Recycle Bin availability");
             RequireRecycleEnabled(volumeGuid);
+            return mount;
+        }
+
+        private static void RequireSafeAncestors(string fullPath, string mount)
+        {
+            string targetMount = mount.TrimEnd('\\');
+            string current = Path.GetDirectoryName(fullPath);
+            while (!String.IsNullOrEmpty(current))
+            {
+                string normalized = current.TrimEnd('\\');
+                // The volume mount point itself can be a legitimate NTFS folder
+                // mount. Only that exact root is allowed as a reparse ancestor.
+                if (SamePath(normalized, targetMount)) break;
+
+                IntPtr handle = CreateFileW(
+                    normalized,
+                    FileReadAttributes,
+                    FileShareAll,
+                    IntPtr.Zero,
+                    OpenExisting,
+                    FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                    IntPtr.Zero);
+                if (handle == InvalidHandle)
+                    throw new InvalidOperationException("Windows could not open an ancestor directory for verification; no delete was scheduled.");
+                try
+                {
+                    ByHandleFileInformation info;
+                    if (!GetFileInformationByHandle(handle, out info))
+                        throw new InvalidOperationException("Windows could not verify an ancestor directory; no delete was scheduled.");
+                    if ((info.FileAttributes & FileAttributeReparsePoint) != 0)
+                        throw new InvalidOperationException("An ancestor directory is a reparse point; this path is not a cleanup candidate.");
+                }
+                finally
+                {
+                    CloseHandle(handle);
+                }
+
+                string parent = Path.GetDirectoryName(current);
+                if (String.IsNullOrEmpty(parent) || SamePath(parent, current)) break;
+                current = parent;
+            }
         }
 
         /** Opens without following links and rejects every reparse-point attribute. */
-        private static string ReadFileIdentity(string path)
+        private static string ReadFileIdentity(string path, string mount)
         {
+            RequireSafeAncestors(path, mount);
             IntPtr handle = CreateFileW(
                 path,
-                0,
+                FileReadAttributes,
                 FileShareAll,
                 IntPtr.Zero,
                 OpenExisting,
@@ -414,7 +460,7 @@ namespace FixStorage
             }
         }
 
-        private static string VerifiedShellPath(string fullPath, object shellItem, string expectedIdentity)
+        private static string VerifiedShellPath(string fullPath, object shellItem, string expectedIdentity, string mount)
         {
             IShellItem item = shellItem as IShellItem;
             if (item == null) throw new InvalidOperationException("Windows did not return a filesystem Shell item; no delete was scheduled.");
@@ -425,7 +471,7 @@ namespace FixStorage
                 string actual = Marshal.PtrToStringUni(pointer);
                 if (!SamePath(actual, fullPath))
                     throw new InvalidOperationException("The Shell item path no longer matches the confirmed path; no delete was scheduled.");
-                if (!String.Equals(ReadFileIdentity(actual), expectedIdentity, StringComparison.Ordinal))
+                if (!String.Equals(ReadFileIdentity(actual, mount), expectedIdentity, StringComparison.Ordinal))
                     throw new InvalidOperationException("The Shell item no longer matches the verified file identity; no delete was scheduled.");
                 return actual;
             }
@@ -460,12 +506,12 @@ namespace FixStorage
             try
             {
                 string fullPath = Path.GetFullPath(path);
-                Preflight(fullPath);
-                string identity = ReadFileIdentity(fullPath);
+                string mount = Preflight(fullPath);
+                string identity = ReadFileIdentity(fullPath, mount);
 
                 Guid interfaceId = ShellItemGuid;
                 Check(SHCreateItemFromParsingName(fullPath, IntPtr.Zero, ref interfaceId, out item), "Creating the Shell item");
-                VerifiedShellPath(fullPath, item, identity);
+                VerifiedShellPath(fullPath, item, identity, mount);
 
                 operation = (IFileOperation)new FileOperationComObject();
                 uint flags = RecycleOnDelete | EarlyFailure | AddUndoRecord | NoErrorUi | NoConfirmation | Silent;

@@ -305,7 +305,7 @@ function Totals({ state, fs }: Ctx) {
         <T fs={fs} color={MUTED}>{" full"}</T>
       </Box>
       {IS_WINDOWS || state.freed > 0 ? (
-        <T fs={fs} color={GREEN}>{IS_WINDOWS ? `~${gb(state.freed)} reclaimed · ~${gb(state.movedToRecycleBinBytes)} in ${TRASH_NAME}` : `~${gb(state.freed)} cleared this session`}</T>
+        <T fs={fs} color={GREEN}>{IS_WINDOWS ? `~${gb(state.freed)} net free-space increase observed · ~${gb(state.movedToRecycleBinBytes)} in ${TRASH_NAME}` : `~${gb(state.freed)} cleared this session`}</T>
       ) : !IS_MAC && state.drives[state.drive] ? (
         <T fs={fs} color={FAINT} style={{ flexShrink: 1, ellipsis: true, margin: { left: ch(fs, 2) } }}>
           {driveDetail(state)}

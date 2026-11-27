@@ -11,7 +11,7 @@ Do not open a public issue for suspected cleanup-safety vulnerabilities. Use the
 - Every real cleanup uses `IFileOperation` with forced recycle-on-delete and a sink that aborts non-recycle operations; there is no permanent-delete fallback.
 - Protected paths and reparse points are rejected before Shell operations.
 - Exact paths, count and estimated size require a second confirmation.
-- Failures leave the item alone and never trigger a different deletion mechanism.
+- Preflight failures leave the item untouched and never trigger a different deletion mechanism. A post-delete Shell failure can occur after the operation has already taken effect; those outcomes are reported as unconfirmed/unknown and require manual inspection.
 - The app does not elevate, unlock files, change ACLs or empty the Recycle Bin.
 
 The implementation is currently unverified. See `docs/windows-security.md` and the outstanding validation matrix in `WINDOWS.md`.

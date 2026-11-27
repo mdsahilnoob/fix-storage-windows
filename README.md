@@ -6,12 +6,12 @@ A native Windows port of [fix-storage](https://github.com/govijr/fix-storage), f
 
 ## Safety model
 
-- Every real Windows cleanup operation uses the Windows Recycle Bin.
+- The cleanup design routes every real Windows operation through the Windows Recycle Bin provider; this is source-level intent and still requires Windows runtime proof.
 - There is no permanent-delete option or fallback.
 - The app never empties the Recycle Bin.
 - Cleanup requires a second keypress after showing the exact paths, item count, estimated size, and destination.
 - `--dry-run` and `--demo` do not change filesystem contents.
-- Moved bytes and actually reclaimed bytes are reported separately; Recycle Bin moves do not count as reclaimed space.
+- Moved bytes and observed net free-space changes are reported separately; Recycle Bin moves are not treated as reclaimed space or attributed solely to this app.
 - Windows, installed-program locations, boot/recovery data, profile roots, volume roots, and Recycle Bin contents are protected.
 - Junctions and symbolic links are not traversed or accepted for cleanup.
 

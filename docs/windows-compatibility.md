@@ -2,7 +2,7 @@
 
 ## Repository boundary
 
-At inspection, `fix-storage` was a clean Git repository on `main`; `fix-storage-windows` existed as an empty non-Git directory. Only project content was copied, never `.git`. No original file was modified, no dependencies were installed in the original, and no tests were run in either directory.
+At the initial inspection, `fix-storage` was a clean Git repository on `main` and `fix-storage-windows` was an empty directory. Only project content was copied, never `.git`. The Windows port was later initialized as its own Git repository on `main`. No original file was modified, no dependencies were installed in the original, and no tests were run in either directory.
 
 ## Original architecture
 

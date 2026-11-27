@@ -75,7 +75,7 @@ export interface AppState {
     | null;
   /** Item being moved or deleted right now. */
   removing: string | null;
-  /** Bytes actually reclaimed since the app started, from fresh disk measurements. */
+  /** Net free-space increase observed since startup; not attributed solely to this app. */
   freed: number;
   /** Estimated logical bytes moved to the Recycle Bin; no space reclaimed yet. */
   movedToRecycleBinBytes: number;
@@ -780,6 +780,7 @@ export class Store {
     };
 
     let skipped = 0;
+    let unknownCount = 0;
     let cleanupError = "";
     let movedEstimate = 0;
     const skippedPaths = new Set<string>();
@@ -792,10 +793,11 @@ export class Store {
     } else {
       const result = await clean(id, items, layout, { dryRun: this.options.dryRun, onProgress });
       skipped = result.skipped.length;
+      unknownCount = result.unknown.length;
       movedEstimate = result.movedToRecycleBinBytes;
-      for (const path of result.skipped) skippedPaths.add(IS_WINDOWS ? normalPath(path) : path);
+      for (const path of [...result.skipped, ...result.unknown]) skippedPaths.add(IS_WINDOWS ? normalPath(path) : path);
       const first = result.errors?.[0];
-      if (first) cleanupError = `${first.path}: ${first.error}`;
+      if (first) cleanupError = `${first.outcome === "unknown" ? "Unknown outcome" : "Failure"} at ${first.path}: ${first.error}`;
     }
 
     // Replace the running estimate with what is actually on disk now. Actual
@@ -825,14 +827,15 @@ export class Store {
     const parts = IS_WINDOWS
       ? [`${CATEGORY[id].name}: ${size(movedEstimate)} ${outcome}.`]
       : [`${CATEGORY[id].name}: ${size(estimateChange)} ${outcome}.`];
-    if (!this.pretend && actualFreed > 0) parts.push(`${size(actualFreed)} actually reclaimed from a fresh disk measurement.`);
+    if (!this.pretend && actualFreed > 0) parts.push(`${size(actualFreed)} net free-space increase observed during cleanup; other activity may also contribute.`);
     if (IS_WINDOWS && !dryRun && !this.options.demo) parts.push("No disk space is reclaimed until you choose to empty the Recycle Bin in Windows.");
     if (skipped > 0) parts.push(
       IS_WINDOWS
         ? `${skipped} ${skipped === 1 ? "item was" : "items were"} not confirmed as recycled; inspect the listed path manually.`
         : `${skipped} ${skipped === 1 ? "item was" : "items were"} in use or protected and left alone.`,
     );
-    if (cleanupError) parts.push(`First error: ${cleanupError}`);
+    if (unknownCount > 0) parts.push(`${unknownCount} ${unknownCount === 1 ? "item has" : "items have"} an unknown recycle outcome and require manual inspection.`);
+    if (cleanupError) parts.push(`First issue: ${cleanupError}`);
     const sessionFreed = dryRun
       ? this.state.freed
       : this.options.demo

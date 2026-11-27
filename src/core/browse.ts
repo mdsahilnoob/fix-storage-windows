@@ -444,7 +444,10 @@ function run(file: string, args: string[]): Promise<void> {
 export async function moveToTrash(path: string, layout: Layout): Promise<string> {
   if (IS_WINDOWS) {
     const result = await recycleWindows([path], layout);
-    if (result.moved.length !== 1) throw new Error(result.failed[0]?.error ?? "Windows did not recycle this item; it was left untouched.");
+    if (result.moved.length !== 1) {
+      const detail = result.unknown[0]?.error ?? result.failed[0]?.error ?? "Windows did not confirm a Recycle Bin destination; manual inspection is required.";
+      throw new Error(detail);
+    }
     return trashPathFor(path, layout);
   }
   if (!IS_MAC) return trashLinux(path, layout.home);

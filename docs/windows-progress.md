@@ -5,7 +5,7 @@ This document tracks implementation status. It is a static development record, n
 ## Repository audit
 
 - [x] Located separate `fix-storage` and `fix-storage-windows` directories.
-- [x] Confirmed the original is a clean Git repository and the Windows directory is not a Git repository.
+- [x] Confirmed the original and Windows port are separate repositories; the Windows port was initialized later on `main`.
 - [x] Copied project content without Git metadata; original files are read-only reference material.
 - [x] Audited CLI, scanner, drive discovery, layouts, classification, cleanup, UI, dependencies, and tests.
 
@@ -55,6 +55,27 @@ None of these repairs has been built or executed.
 - [x] Documentation records that Node `lstat` cannot identify every reparse tag and that native predelete checks cover selected cleanup paths.
 
 None of these repairs has been built or executed.
+
+## Second static-review repair pass
+
+- [x] Managed `IFileOperationProgressSink` definition no longer uses `[ComImport]`; consumed COM interfaces remain imported.
+- [x] All native wide-string callback parameters declare `UnmanagedType.LPWStr`.
+- [x] Native cleanup runs in bounded batches; incomplete/malformed results become `unknown`, never silent success or ordinary failure, and are not retried.
+- [x] Native ancestor chain validation accepts only the exact volume mount point as a legitimate reparse root.
+- [x] Reclaimed-byte wording changed to net free-space increase observed, with a warning about concurrent activity.
+- [x] Confirmed `HEAD`, `origin/main` and `git ls-remote origin main` all resolve to commit `bec3afe`.
+
+None of these repairs has been built or executed.
+
+## Third static-review repair pass
+
+- [x] `CleanResult.errors` now uses a discriminated `failed`/`unknown` outcome type instead of an untagged optional flag.
+- [x] `DeleteItem` receives the callback through an `IFileOperationProgressSink`-typed parameter.
+- [x] Native batches have configurable timeouts and cancellation; post-start uncertainty is `unknown`, never rollback.
+- [x] Native result parsing rejects duplicates, unexpected/missing paths and contradictory success/error fields with Windows case-insensitive matching.
+- [x] Documentation reconciles failure semantics, capacity limits, repository history, and future disposable-VM validation scope.
+
+No runtime verification has been performed.
 
 ## Outstanding validation
 

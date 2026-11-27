@@ -171,7 +171,7 @@ export function createWindowsApp(ink: InkModule) {
         </Box>
         <Text color="cyan" wrap="truncate">{state.drives.map((item, index) => `${index === state.drive ? "[" : ""}${index + 1}:${item.name}${index === state.drive ? "]" : ""}`).join("  ")}</Text>
         <Text>{gb(state.scan.used)} used of {capacity(state.scan.total)} · {gb(state.scan.available)} free · {pct(state.scan.used, state.scan.total)} full</Text>
-        <Text dimColor>{`session: ${gb(state.freed)} reclaimed · ${gb(state.movedToRecycleBinBytes)} moved to ${TRASH_NAME} (not reclaimed)`}</Text>
+        <Text dimColor>{`session: net free-space increase ${gb(state.freed)} observed · ${gb(state.movedToRecycleBinBytes)} moved to ${TRASH_NAME} (not reclaimed)`}</Text>
         {drive ? <Text dimColor wrap="truncate">{[drive.fstype, drive.driveType, drive.label, drive.mount, drive.readOnly ? "read-only" : ""].filter(Boolean).join(" · ")}</Text> : null}
         <Meter store={store} />
         <Box flexGrow={1} marginTop={1}>
