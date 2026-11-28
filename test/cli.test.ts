@@ -48,6 +48,22 @@ test("cleanup rejection is not masked by help", () => {
   expect(result.stderr).toContain("READ-ONLY");
 });
 
+test("invalid scanner selections are rejected explicitly", () => {
+  const forms = [
+    ["--scanner"],
+    ["--scanner", "bogus"],
+    ["--scanner="],
+    ["--scanner=bogus"],
+    ["--scanner-rust-path"],
+    ["--scanner-rust-path="],
+  ];
+  for (const args of forms) {
+    const result = run(args);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/--scanner|--scanner-rust-path/);
+  }
+});
+
 test("missing or empty --drive values are rejected instead of selecting a default drive", () => {
   const forms = [
     ["--drive"],

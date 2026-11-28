@@ -1,11 +1,22 @@
 import { createRoot } from "@zenbu-labs/pixel";
 import { driveArg } from "./plain";
+import {
+  rustScannerExecutable,
+  rustScannerPathArg,
+  scannerArg,
+  selectScannerEngine,
+} from "./core/scanner-selection";
 import { App } from "./ui/app";
 import { Store } from "./ui/store";
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);
-const store = new Store({ demo: args.has("--demo"), drive: driveArg(argv) });
+const store = new Store({
+  demo: args.has("--demo"),
+  drive: driveArg(argv),
+  scanner: selectScannerEngine(scannerArg(argv)),
+  rustScannerPath: rustScannerPathArg(argv) ?? rustScannerExecutable(),
+});
 
 const quit = () => {
   store.stop();

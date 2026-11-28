@@ -24,6 +24,9 @@ Usage: fix-storage [options]
 ${linux || windows ? `  --drives       List mounted drives${windows ? " and volumes without access paths" : ", and partitions that are not mounted"}, and exit.
   --drive <d>    Start on drive <d>: its number from --drives, its name, mount
                   point, label or device, or any path on it.
+  --scanner <s>  Development-only: typescript (default) or rust.
+  --scanner-rust-path <p>
+                  Executable path for the development Rust scanner.
 ` : ""}  -h, --help     Show this help.
 
 Automated cleanup is not supported in v1. Recommendations are informational
@@ -53,6 +56,7 @@ if (args.includes("-h") || args.includes("--help")) {
 }
 
 const known = new Set(["--demo", "--plain", "--json", "--drives"]);
+const scannerOptions = new Set(["typescript", "rust"]);
 let unknown;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -65,6 +69,28 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg.startsWith("--drive=")) {
     if (!arg.slice("--drive=".length).trim()) {
       process.stderr.write(`fix-storage: --drive needs a drive\n\n${HELP}`);
+      process.exit(2);
+    }
+  } else if (arg === "--scanner") {
+    if (!args[i + 1] || !scannerOptions.has(args[i + 1])) {
+      process.stderr.write(`fix-storage: --scanner needs typescript or rust\n\n${HELP}`);
+      process.exit(2);
+    }
+    i++;
+  } else if (arg.startsWith("--scanner=")) {
+    if (!scannerOptions.has(arg.slice("--scanner=".length))) {
+      process.stderr.write(`fix-storage: --scanner needs typescript or rust\n\n${HELP}`);
+      process.exit(2);
+    }
+  } else if (arg === "--scanner-rust-path") {
+    if (!args[i + 1] || !args[i + 1].trim()) {
+      process.stderr.write(`fix-storage: --scanner-rust-path needs an executable path\n\n${HELP}`);
+      process.exit(2);
+    }
+    i++;
+  } else if (arg.startsWith("--scanner-rust-path=")) {
+    if (!arg.slice("--scanner-rust-path=".length).trim()) {
+      process.stderr.write(`fix-storage: --scanner-rust-path needs an executable path\n\n${HELP}`);
       process.exit(2);
     }
   } else if (!known.has(arg)) {

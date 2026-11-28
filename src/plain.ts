@@ -4,7 +4,9 @@ import { describePartition, listDrives, mountCommand, pickDrive, type Drive, typ
 import { capacity, gb, size, tilde } from "./core/format";
 import { layoutFor, type Layout } from "./core/layout";
 import { IS_MAC, IS_WINDOWS } from "./core/platform";
-import { diskSpace, startScan, unmeasuredBytes, type ScanSnapshot } from "./core/scan";
+import { rustScannerExecutable, rustScannerPathArg, scannerArg, selectScannerEngine } from "./core/scanner-selection";
+import { startRustScan } from "./core/rust-scan";
+import { diskSpace, startScan, unmeasuredBytes, type ScanHandle, type ScanSnapshot } from "./core/scan";
 
 /** The value given with --drive, as `--drive x` or `--drive=x`. */
 export function driveArg(args: string[]): string | undefined {
@@ -31,7 +33,18 @@ export async function runPlain(args: string[]): Promise<void> {
   const drive = pickDrive(wanted, drives);
   if (!drive) throw new Error(`no drive matches ${wanted}; fix-storage --drives lists them`);
   const layout = demo ? demoLayout(drive) : await layoutFor(drive);
-  const start = demo ? startDemoScan : startScan;
+  const engine = selectScannerEngine(scannerArg(args));
+  if (engine === "rust" && demo) throw new Error("the Rust scanner cannot be used with --demo");
+  const start: (target: Layout, update: (snapshot: ScanSnapshot) => void) => ScanHandle =
+    demo
+      ? startDemoScan
+      : engine === "rust"
+        ? (target, update) => {
+            const executable = rustScannerPathArg(args) ?? rustScannerExecutable();
+            if (!executable) throw new Error("the Rust scanner requires --scanner-rust-path or FIX_STORAGE_RUST_SCANNER");
+            return startRustScan(target, update, { executable });
+          }
+        : startScan;
   const live = process.stderr.isTTY === true;
 
   const handle = start(layout, (snapshot) => {

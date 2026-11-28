@@ -7,8 +7,6 @@ import type { CategoryId } from "./categories";
  * imported by the production store or CLI. Callers must opt in explicitly with
  * an absolute executable path and a development configuration.
  */
-export const RUST_SCANNER_ENV = "FIX_STORAGE_RUST_SCANNER";
-
 export const RUST_SCHEMA_VERSION = "1.0" as const;
 
 export type RustScanPhase = "scanning" | "completed" | "cancelled" | "failed";
@@ -65,6 +63,18 @@ export interface RustSummary {
   errorCount: number;
 }
 
+export interface RustScanMetrics {
+  batches: number;
+  entries: number;
+  maxBatch: number;
+  maxStdBufferedChars: number;
+  maxPendingBatches: number;
+  parseMs: number;
+  validationMs: number;
+  assemblyMs: number;
+  elapsedMs: number;
+}
+
 export interface RustScanResult {
   phase: RustScanPhase;
   partial: boolean;
@@ -74,6 +84,7 @@ export interface RustScanResult {
   summary: RustSummary;
   stderr: string;
   cancelled: boolean;
+  metrics: RustScanMetrics;
 }
 
 export interface RustScannerOptions {
@@ -193,6 +204,18 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
 
   const maxEntries = options.maxEntries ?? 1_000_000;
   const batchLimit = Math.max(1, Math.min(1_000, request.options.batchSize));
+  const startedAt = performance.now();
+  const metrics: RustScanMetrics = {
+    batches: 0,
+    entries: 0,
+    maxBatch: 0,
+    maxStdBufferedChars: 0,
+    maxPendingBatches: 0,
+    parseMs: 0,
+    validationMs: 0,
+    assemblyMs: 0,
+    elapsedMs: 0,
+  };
   const child: ChildProcessWithoutNullStreams = spawn(options.executable, options.args ?? [], {
     shell: false,
     windowsHide: true,
@@ -231,6 +254,7 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
       rejectResult(new Error(cancelled ? "Rust scanner terminated after cancellation without a final event" : "Rust scanner terminated without a final event"));
       return;
     }
+    metrics.elapsedMs = performance.now() - startedAt;
     resolveResult({
       phase: terminal.phase,
       partial: terminal.phase !== "completed",
@@ -240,6 +264,7 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
       summary,
       stderr,
       cancelled,
+      metrics,
     });
   };
 
@@ -251,11 +276,15 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
   const consume = (line: string) => {
     if (!line.trim()) return;
     let event: unknown;
+    const parseStarted = performance.now();
     try {
       event = JSON.parse(line);
     } catch {
       throw new RustProtocolError("invalid JSON event");
     }
+    metrics.parseMs += performance.now() - parseStarted;
+
+    const validationStarted = performance.now();
     if (!isRecord(event)) throw new RustProtocolError("event must be an object");
     if (event.schemaVersion !== RUST_SCHEMA_VERSION) throw new RustProtocolError("event schemaVersion mismatch");
     if (event.requestId !== request.requestId) throw new RustProtocolError("event requestId mismatch");
@@ -267,7 +296,9 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
     const phase = terminalPhase(event.type);
     if (phase) {
       if (terminal) throw new RustProtocolError("duplicate terminal event");
-      if (event.type === "scan_completed" && cancelled) throw new RustProtocolError("completed event after cancellation request");
+      // A cancellation can race with a scan that has already completed. The
+      // terminal event is authoritative; keep `cancelled` as a request flag,
+      // but do not turn a legitimate completed result into a protocol failure.
       if (event.type === "scan_completed" && event.summary === undefined) throw new RustProtocolError("completed event missing summary");
       if (event.summary !== undefined) summary = summaryField(event.summary);
       else if (phase === "failed") summary = emptySummary();
@@ -275,26 +306,36 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
         phase,
         error: typeof event.error === "string" ? event.error : null,
       };
+      metrics.validationMs += performance.now() - validationStarted;
       finish();
       return;
     }
     if (event.type === "entries_batch") {
       if (!Array.isArray(event.entries)) throw new RustProtocolError("entries_batch missing entries");
       if (event.entries.length > batchLimit) throw new RustProtocolError("entries_batch exceeds requested batch size");
+      metrics.validationMs += performance.now() - validationStarted;
+      const assemblyStarted = performance.now();
+      metrics.batches++;
+      metrics.maxPendingBatches = Math.max(metrics.maxPendingBatches, 1);
+      metrics.maxBatch = Math.max(metrics.maxBatch, event.entries.length);
       for (const value of event.entries) {
         if (entries.length >= maxEntries) throw new RustProtocolError("entry limit exceeded");
         entries.push(entryField(value));
       }
+      metrics.entries = entries.length;
+      metrics.assemblyMs += performance.now() - assemblyStarted;
       return;
     }
     if (event.type === "scan_error" || event.type === "scan_warning") {
       errors.push(issueField(event));
     }
+    metrics.validationMs += performance.now() - validationStarted;
   };
 
   child.stdout.on("data", (chunk: Buffer) => {
     if (settled) return;
     stdoutBuffer += decoder.write(chunk);
+    metrics.maxStdBufferedChars = Math.max(metrics.maxStdBufferedChars, stdoutBuffer.length);
     try {
       for (;;) {
         const newline = stdoutBuffer.indexOf("\n");
@@ -350,9 +391,4 @@ export function launchRustScanner(request: RustScanRequest, options: RustScanner
   child.stdin.write(`${JSON.stringify(request)}\n`);
 
   return { result, cancel };
-}
-
-/** Development-only opt-in guard. The production scanner never calls this. */
-export function rustScannerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return process.platform === "win32" && env[RUST_SCANNER_ENV] === "1";
 }

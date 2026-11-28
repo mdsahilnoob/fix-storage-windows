@@ -79,3 +79,23 @@ jobs:
           }
           if (-not ($paths -contains 'bin/fix-storage.cjs')) { throw "package is missing bin/fix-storage.cjs" }
           if (-not ($paths -match '^dist/')) { throw "package is missing dist/" }
+
+  rust-scanner:
+    name: Windows Rust scanner
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable-x86_64-pc-windows-gnu
+      - name: Rust tests
+        run: cargo test --manifest-path scanner-rust/Cargo.toml
+      - name: Rust release build
+        run: cargo build --release --manifest-path scanner-rust/Cargo.toml
+      - name: Rust binary SHA-256
+        shell: pwsh
+        run: Get-FileHash scanner-rust/target/release/fix-storage-scanner-rust.exe -Algorithm SHA256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fix-storage-scanner-rust-windows-x64
+          path: scanner-rust/target/release/fix-storage-scanner-rust.exe

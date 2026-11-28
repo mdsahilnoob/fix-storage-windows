@@ -1,5 +1,11 @@
 import { createElement } from "react";
 import { driveArg } from "./plain";
+import {
+  rustScannerExecutable,
+  rustScannerPathArg,
+  scannerArg,
+  selectScannerEngine,
+} from "./core/scanner-selection";
 import { Store } from "./ui/store";
 import { createWindowsApp, type InkModule } from "./ui/windows-app";
 
@@ -10,7 +16,12 @@ const importModule = new Function("specifier", "return import(specifier)") as (s
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const args = new Set(argv);
-  const store = new Store({ demo: args.has("--demo"), drive: driveArg(argv) });
+  const store = new Store({
+    demo: args.has("--demo"),
+    drive: driveArg(argv),
+    scanner: selectScannerEngine(scannerArg(argv)),
+    rustScannerPath: rustScannerPathArg(argv) ?? rustScannerExecutable(),
+  });
   const ink = await importModule("ink");
   const App = createWindowsApp(ink);
   const view = ink.render(createElement(App, { store, onQuit: () => view.unmount() }), { exitOnCtrlC: false });

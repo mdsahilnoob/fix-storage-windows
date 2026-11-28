@@ -109,6 +109,10 @@ test("accepts a completed event and bounded entry batch", async () => {
   expect(result.entries).toHaveLength(1);
   expect(result.entries[0]?.logicalBytes).toBe(5);
   expect(result.summary.measuredBytes).toBe(5);
+  expect(result.metrics.batches).toBe(1);
+  expect(result.metrics.entries).toBe(1);
+  expect(result.metrics.maxBatch).toBe(1);
+  expect(result.metrics.maxPendingBatches).toBe(1);
 });
 
 test("supports cooperative cancellation and returns cancelled with partial state", async () => {

@@ -30,6 +30,8 @@ import {
 } from "../core/recommendations";
 import { normalPath } from "../core/windows/paths";
 import { emptySnapshot, startScan, type Item, type ScanHandle, type ScanSnapshot } from "../core/scan";
+import { rustScannerExecutable, selectScannerEngine, type ScannerEngine } from "../core/scanner-selection";
+import { startRustScan } from "../core/rust-scan";
 
 export interface AnalysisProgress {
   id: CategoryId;
@@ -69,6 +71,9 @@ export interface AppState {
 export interface Options {
   demo: boolean;
   drive?: string;
+  /** Development-only selection; TypeScript remains the default. */
+  scanner?: ScannerEngine;
+  rustScannerPath?: string;
 }
 
 type Listener = () => void;
@@ -285,7 +290,22 @@ export class Store {
         this.set({ scan: cached });
         return;
       }
-      const start = this.options.demo ? startDemoScan : startScan;
+      const engine = selectScannerEngine(this.options.scanner);
+      if (engine === "rust" && this.options.demo) {
+        throw new Error("the Rust scanner cannot be used with --demo");
+      }
+      const start: (target: Layout, update: (snapshot: ScanSnapshot) => void) => ScanHandle =
+        this.options.demo
+          ? startDemoScan
+          : engine === "rust"
+            ? (target, update) => {
+                const executable = this.options.rustScannerPath ?? rustScannerExecutable();
+                if (!executable) {
+                  throw new Error("the Rust scanner requires --scanner-rust-path or FIX_STORAGE_RUST_SCANNER");
+                }
+                return startRustScan(target, update, { executable });
+              }
+            : startScan;
       const handle = start(layout, (scan) => {
         if (this.scanHandle !== handle) return;
         if (scan.phase === "completed") this.scans.set(drive.id, scan);
