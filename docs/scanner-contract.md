@@ -43,6 +43,8 @@ Each entry has:
 
 `type` is one of `file`, `directory`, `symlink`, `junction`, `reparse`, `unknown`.
 
+On Windows, Node's `lstat` does not expose the native reparse tag, so symlinks and junctions are currently normalized as `reparse`. On non-Windows hosts, symbolic links are normalized as `symlink`.
+
 Nested roots take precedence:
 
 - A directory that is itself a declared root is excluded from its parent root's scan.
@@ -176,11 +178,11 @@ System accounting rule:
 
 These are observed gaps in the reference implementation, not intended new behavior:
 
-- `addFile()` swallows file-level `lstat` failures, so some permission errors can be absent from `blocked`.
-- `startScan()` reports a denied nested measurement only when its accessible size is below 1 MiB.
-- `startScan()` does not consult `layout.foreign`; it relies primarily on reparse-point handling for mounted-volume boundaries.
-- Scanner items do not carry an explicit symlink/junction/reparse type, so the reference report labels entries as file or directory.
+- A denied nested subtree is reported as the measured parent path, not the deepest denied child path, because `windowsDu()` returns only a boolean.
+- Windows symlink and junction entries are both normalized as `reparse`; the native reparse tag is not exposed by Node's filesystem API.
 - Hard links are measured per path, so logical totals can exceed unique physical storage.
+- Zero-byte files are omitted from `entries`; they contribute zero to totals.
+- Unknown reparse directories that do not appear as links to Node must be treated as non-traversable by future scanners and are not currently distinguished.
 
 ## Reference and differential harness
 

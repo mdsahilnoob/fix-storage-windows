@@ -8,11 +8,15 @@ import { IS_MAC, IS_WINDOWS } from "./platform";
 import { extendedPath, normalPath, windowsEntryKind } from "./windows/paths";
 import { windowsDu } from "./windows/scan";
 
+export type ItemKind = "file" | "directory" | "symlink" | "junction" | "reparse" | "unknown";
+
 export interface Item {
   path: string;
   size: number;
   /** True for folders, which can be opened for a closer look. */
   dir?: boolean;
+  /** Explicit type when the scanner can distinguish it. */
+  kind?: ItemKind;
 }
 
 export type ScanPhase = "scanning" | "completed" | "cancelled" | "failed";
@@ -234,9 +238,14 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
           if (cancelled) return;
           const bytes = IS_WINDOWS ? Number(stat.size) : stat.blocks * 512;
           add(category, bytes);
-          if (bytes > 0) snap.items[category].push({ path, size: bytes, dir: false });
-        } catch {
-          // vanished or unreadable; nothing to count
+          const kind: ItemKind = stat.isSymbolicLink()
+            ? IS_WINDOWS ? "reparse" : "symlink"
+            : stat.isDirectory() ? "directory" : "file";
+          if (bytes > 0) snap.items[category].push({ path, size: bytes, dir: false, kind });
+        } catch (error) {
+          // A vanished file contributes nothing. Permission failures are real
+          // scan errors and must not disappear into the aggregate.
+          if (denied(error)) report(path, category);
         }
       };
 
@@ -276,7 +285,7 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
         for (const entry of entries) {
           if (cancelled) return;
           const child = join(path, entry.name);
-          if (rootPaths.has(pathKey(child)) || layout.skip(child)) continue;
+          if (rootPaths.has(pathKey(child)) || layout.skip(child) || layout.foreign(child)) continue;
           const kind = hidden !== undefined && entry.name.startsWith(".") ? hidden : category;
           if (entry.isDirectory()) {
             if (holdsRoot(child)) {
@@ -296,6 +305,7 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
       const sorted: Root[] = [...all].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
       for (const root of sorted) {
         if (cancelled) return finish("cancelled");
+        if (layout.foreign(root.path)) continue;
         snap.current = root.path;
         await expand(root.path, root.category, root.hidden);
         if (cancelled) return finish("cancelled");
@@ -311,8 +321,8 @@ export function startScan(layout: Layout, onUpdate: (snapshot: ScanSnapshot) => 
           const result = await du(unit.path, children, () => cancelled);
           if (cancelled) return;
           add(unit.category, result.bytes);
-          if (result.bytes > 0) snap.items[unit.category].push({ path: unit.path, size: result.bytes, dir: true });
-          if (result.denied && result.bytes < 1024 * 1024) report(unit.path, unit.category);
+          if (result.bytes > 0) snap.items[unit.category].push({ path: unit.path, size: result.bytes, dir: true, kind: "directory" });
+          if (result.denied) report(unit.path, unit.category);
           emit();
         }
       };

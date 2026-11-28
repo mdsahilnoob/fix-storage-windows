@@ -22,7 +22,7 @@ const entries = CATEGORIES.flatMap((category) =>
   scan.items[category.id].map((item) => ({
     displayPath: item.path,
     pathKey: normalPath(item.path),
-    type: item.dir ? "directory" : "file",
+    type: item.kind ?? (item.dir ? "directory" : "file"),
     logicalBytes: item.size,
     category: category.id,
   })),

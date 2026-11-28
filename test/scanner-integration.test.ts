@@ -18,6 +18,7 @@ const used = (stats.blocks - stats.bavail) * stats.bsize;
 const statfs = spyOn(fsp, "statfs");
 let root = "";
 let readdirSpy: ReturnType<typeof spyOn> | null = null;
+let lstatSpy: ReturnType<typeof spyOn> | null = null;
 
 beforeEach(async () => {
   root = await fsp.mkdtemp(join(tmpdir(), "fix-storage-scanner-"));
@@ -27,7 +28,9 @@ beforeEach(async () => {
 afterEach(async () => {
   statfs.mockReset();
   readdirSpy?.mockRestore();
+  lstatSpy?.mockRestore();
   readdirSpy = null;
+  lstatSpy = null;
   if (root) {
     await fsp.rm(extendedPath(root), { recursive: true, force: true }).catch(() => undefined);
     root = "";
@@ -81,9 +84,9 @@ test("traverses files and nested directories with exact logical sizes", async ()
   expect(result.sizes.system).toBe(used - 3348);
   expect(unmeasuredBytes(result)).toBe(used - 3348);
   expect(result.items.documents).toHaveLength(2);
-  expect(result.items.documents.map((item) => [basename(item.path), item.size, item.dir])).toEqual([
-    ["sub", 2348, true],
-    ["a.bin", 1000, false],
+  expect(result.items.documents.map((item) => [basename(item.path), item.size, item.dir, item.kind])).toEqual([
+    ["sub", 2348, true, "directory"],
+    ["a.bin", 1000, false, "file"],
   ]);
   expect(await windowsDu(join(root, "sub"))).toEqual({ bytes: 2348, denied: false });
   expect(await windowsFileSize(a)).toBe(1000);
@@ -128,6 +131,58 @@ test("honors skip/foreign boundaries and reports protected paths", async () => {
   expect(classify({ path: join(root, "$Recycle.Bin", "old.bin"), size: 1 }, "trash").verdict).toBe("junk");
 });
 
+test("reports file-level permission errors as blocked", async () => {
+  await makeFile("visible.bin", 100);
+  const secret = await makeFile("secret.bin", 200);
+
+  const original = fsp.lstat.bind(fsp);
+  lstatSpy = spyOn(fsp, "lstat").mockImplementation((async (...args: unknown[]) => {
+    if (normalPath(String(args[0])).endsWith("\\secret.bin")) {
+      const error = new Error("access denied") as NodeJS.ErrnoException;
+      error.code = "EACCES";
+      throw error;
+    }
+    return (original as (...items: unknown[]) => Promise<unknown>)(...args);
+  }) as typeof fsp.lstat);
+
+  const result = await scan([{ path: root, category: "documents" }]);
+  expect(result.measured).toBe(100);
+  expect(result.blocked).toContain(secret);
+});
+
+test("does not suppress a denied nested subtree when accessible bytes exceed 1 MiB", async () => {
+  const huge = await makeDir("huge");
+  await makeFile("huge/readable.bin", 1_500_000);
+  const denied = await makeDir("huge/denied");
+  await makeFile("huge/denied/secret.bin", 100);
+
+  const original = fsp.readdir.bind(fsp);
+  readdirSpy = spyOn(fsp, "readdir").mockImplementation((async (...args: unknown[]) => {
+    if (normalPath(String(args[0])).endsWith("\\huge\\denied")) {
+      const error = new Error("access denied") as NodeJS.ErrnoException;
+      error.code = "EACCES";
+      throw error;
+    }
+    return (original as (...items: unknown[]) => Promise<unknown>)(...args);
+  }) as typeof fsp.readdir);
+
+  const result = await scan([{ path: root, category: "documents" }]);
+  expect(result.measured).toBe(1_500_000);
+  expect(result.blocked).toContain(huge);
+  expect(denied).toContain("denied");
+});
+
+test("enforces layout.foreign boundaries during scanning", async () => {
+  await makeFile("local.bin", 100);
+  await makeFile("foreign/blocked.bin", 500);
+  const custom = layout([{ path: root, category: "documents" }]);
+  custom.foreign = (path) => basename(path) === "foreign";
+
+  const result = await startScan(custom, () => {}, { concurrency: 1, throttleMs: 0 }).done;
+  expect(result.measured).toBe(100);
+  expect(result.items.documents.some((item) => basename(item.path) === "foreign")).toBe(false);
+});
+
 test("reports directory permission errors as blocked instead of discarding them", async () => {
   await makeFile("visible.bin", 100);
   const denied = await makeDir("denied");
@@ -164,7 +219,9 @@ test("does not traverse junctions or reparse directories", async () => {
   expect(await windowsDu(link)).toEqual({ bytes: linkSize, denied: false });
   expect(result.measured).toBe(4096 + linkSize);
   expect(result.items.documents.map((item) => basename(item.path)).sort()).toEqual(["junction", "target"]);
-  expect(result.items.documents.find((item) => basename(item.path) === "junction")?.dir).toBe(false);
+  const junctionItem = result.items.documents.find((item) => basename(item.path) === "junction");
+  expect(junctionItem?.dir).toBe(false);
+  expect(junctionItem?.kind).toBe("reparse");
 });
 
 test("handles Unicode names and very long Windows paths", async () => {
