@@ -144,7 +144,9 @@ unmeasured bytes, category totals, entries, and errors for those corpora.
 
 Optimized configuration: native `FindFirstFileExW` enumeration, six bounded
 directory workers, release Rust. TypeScript was measured with concurrency 1 and
-6. Three repetitions were run; the table shows medians in milliseconds.
+6. Three repetitions were run; the table shows medians in milliseconds. With
+only three repetitions, p95 is not statistically meaningful and was not used
+for the acceptance decision.
 
 | Shape | Files | Dirs | TS c1 | TS c6 | Rust | Rust vs TS c6 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -153,26 +155,9 @@ directory workers, release Rust. TypeScript was measured with concurrency 1 and
 | mixed-10x50 | 500 | 10 | 61.26 | 44.57 | 79.26 | 0.56x |
 | large-100x100 | 10,000 | 100 | 1,112.11 | 751.06 | 82.31 | 9.12x |
 
-100,000 files in one directory:
-
-- TypeScript concurrency 1: 14,787.56 ms
-- TypeScript concurrency 6: 14,851.02 ms
-- Rust scan-only summary: 749.11 ms
-- Rust full pretty report with all entries: 8,837.48 ms
-
-The scan-only 100,000-file path is approximately 19.8x faster than TypeScript
-c6. Full report mode is dominated by serializing 100,000 entries and is not a
-2x comparison. The IPC path uses bounded compact batches rather than the pretty
-report format.
-
 Small fixtures are dominated by process startup and cache noise. The large
-10,000-file workload is the meaningful acceptance result; the 100,000-file
-scan-only result is the strongest validation. Full IPC/report overhead remains
-a bottleneck.
-
-The small fixtures remain dominated by process startup and cache noise. The
-10,000-file result and the 100,000-file scan-only result are the meaningful
-large-workload signals; the full report/IPC overhead still needs optimization.
+10,000-file workload is a meaningful acceptance result; the 100,000-entry IPC
+section below covers the larger workload.
 
 ### End-to-end, 10,000 files / 100 directories
 
@@ -201,6 +186,54 @@ The adapter adds process/event overhead over direct report mode, but remains
 substantially faster than the complete TypeScript scan in this workload. The
 adapter output normalized equal to the TypeScript reference.
 
+The reported 590 MB parent RSS is the combined benchmark process after the
+TypeScript scan, 100,000-entry normalization, and a 15.9 MB JSON string. It is
+not a Rust-only adapter footprint. The integration adapter currently retains a
+partial entry array for progress and the final adapter result for a stable
+accounting snapshot; removing that duplicate retention is a future optimization.
+Display rows remain bounded by the UI's `MAX_ROWS`; complete accounting is not
+truncated.
+
+### 100,000-entry IPC run
+
+Actual Rust child through the TypeScript adapter, batch size 200:
+
+| Metric | Value |
+| --- | ---: |
+| Entries | 100,000 |
+| Batches | 500 |
+| Adapter total | 1,037.95 ms |
+| `scan_started` to terminal event | 763.31 ms |
+| NDJSON parse | 259.75 ms |
+| Validation | 3.34 ms |
+| Result assembly | 30.39 ms |
+| Maximum buffered stdout | 121,770 chars |
+| Maximum pending batches | 1 |
+| Rust peak RSS | 30,490,624 bytes |
+| Rust CPU | 468.75 ms user + 203.125 ms system |
+| Rust scan-only summary report | 462.49 ms |
+| Rust full report | 2,415.95 ms |
+| Rust full-report serialization portion | 1,953.45 ms |
+| TypeScript complete scan | 36,274.54 ms |
+| TypeScript normalized JSON | 61.61 ms |
+| TypeScript CLI text render | 3.52 ms |
+| TypeScript JSON size | 15,900,554 bytes |
+
+The adapter produced 100,000 normalized entries with exact TypeScript parity.
+The full report is dominated by serialization; the adapter path is materially
+faster than the full pretty report.
+
+Cancellation while entry batches were arriving was exercised with 10,000 flat
+files, batch size 1. The adapter observed 95 partial entries before cancellation,
+resolved as `cancelled`, and measured approximately 3.97 ms from cancellation
+request to terminal event.
+
+A slow-consumer backpressure probe used 10,000 files, batch size 1, and a
+1 ms synchronous delay for every `entries_batch`. It received 10,000 batches,
+kept at most one pending batch, and observed a maximum stdout buffer of 65,884
+characters. The pipe blocked the producer rather than allowing unbounded
+accumulation.
+
 ## Memory and concurrency
 
 - The production-shaped directory path uses bounded scoped-thread workers.
@@ -217,6 +250,34 @@ adapter output normalized equal to the TypeScript reference.
 - Cancellation is cooperative at directory and entry boundaries.
 - The IPC cancellation path was exercised against a running child process.
 - A five-second watchdog terminates an unresponsive cancelled process.
+
+## Binary distribution
+
+The current GNU-target release binary is `670,174` bytes with SHA-256:
+
+```text
+1E16EF28AE7B22F8188B45BB345007275245B822AE6F74FF3619CDE0C4D6659C
+```
+
+Its observable DLL imports are Windows system libraries:
+
+```text
+bcryptprimitives.dll
+KERNEL32.dll
+msvcrt.dll
+ntdll.dll
+PSAPI.DLL
+api-ms-win-core-synch-l1-2-0.dll
+```
+
+No MinGW-specific runtime DLL was reported by `llvm-objdump`. The binary has
+not been tested on a clean Windows installation without a developer toolchain.
+
+No MSVC-target binary was built in this environment because the MSVC linker and
+Visual Studio C++ build tools were unavailable. CI now has a Windows Rust job
+that installs the GNU target, runs Rust tests, builds the release executable,
+prints its SHA-256, and uploads it as an artifact. No release is published by
+this workflow.
 
 ## Safety
 
