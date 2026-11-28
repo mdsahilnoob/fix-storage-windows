@@ -47,6 +47,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "bench:scanner": "bun bench/scanner-bench.ts",
+    "bench:compare": "bun bench/compare-scanners.ts",
+    "bench:compare:optimized": "bun bench/compare-optimized.ts",
     "scanner:reference": "bun tools/scanner-reference.ts",
     "scanner:diff": "node tools/scanner-differential.mjs",
     "check:readonly": "node tools/check-readonly.cjs",

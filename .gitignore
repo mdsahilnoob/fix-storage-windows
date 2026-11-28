@@ -1,5 +1,6 @@
 node_modules/
 dist/
+scanner-rust/target/
 *.tgz
 *.log
 .DS_Store

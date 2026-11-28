@@ -104,6 +104,7 @@ Windows access timestamps are not treated as last-opened dates. The interface di
 - [Compatibility audit](docs/windows-compatibility.md)
 - [Scanner contract](docs/scanner-contract.md)
 - [Scanner benchmark baseline](docs/scanner-benchmark.md)
+- [Rust scanner prototype](docs/scanner-rust.md)
 - [Progress and implementation status](docs/windows-progress.md)
 - [Changelog](CHANGELOG.md)
 

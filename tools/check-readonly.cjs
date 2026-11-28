@@ -6,8 +6,8 @@ const path = require("node:path");
 const acorn = require("acorn");
 
 const ROOT = path.resolve(__dirname, "..");
-const TARGETS = ["src", "bin", "dist"];
-const EXTENSIONS = new Set([".ts", ".tsx", ".js", ".cjs", ".mjs"]);
+const TARGETS = ["src", "bin", "dist", "scanner-rust/src"];
+const EXTENSIONS = new Set([".ts", ".tsx", ".js", ".cjs", ".mjs", ".rs"]);
 const FS_MODULES = new Set(["node:fs", "fs", "node:fs/promises", "fs/promises"]);
 
 // Filesystem APIs that create, delete, move, rename or modify content.
@@ -186,6 +186,24 @@ function checkTypeScript(file, text) {
   }
 }
 
+function checkRust(file, text) {
+  const code = text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/[^\r\n]*/g, "")
+    .replace(/#\s*\[[^\]]*\]/g, "");
+  const prohibited = [
+    "remove_file", "remove_dir", "remove_dir_all", "rename", "write",
+    "create_dir", "create_dir_all", "create_new", "truncate", "set_len",
+    "set_permissions", "set_file_attributes", "delete", "recycle",
+  ];
+  const pattern = new RegExp(`\\b(?:${prohibited.join("|")})\\b`);
+  const match = pattern.exec(code);
+  if (match) {
+    const line = code.slice(0, match.index).split("\n").length;
+    findings.push(`${path.relative(ROOT, file)}:${line}:1 Rust source uses a filesystem mutation API: ${match[0]}`);
+  }
+}
+
 function checkFile(file) {
   const text = fs.readFileSync(file, "utf8");
   scanned++;
@@ -193,6 +211,7 @@ function checkFile(file) {
     if (text.includes(token)) findings.push(`${path.relative(ROOT, file)}:1:1 forbidden cleanup token ${token}`);
   }
   if (file.endsWith(".ts") || file.endsWith(".tsx")) checkTypeScript(file, text);
+  else if (file.endsWith(".rs")) checkRust(file, text);
   else checkJavaScript(file, text);
 }
 
