@@ -6,6 +6,10 @@
 
 Cleanup recommendations are informational only. You decide whether to act on them yourself, outside this application.
 
+## Demo
+
+![fix-storage Windows terminal UI showing the read-only storage heatmap, category sidebar, and item list](docs/images/windows-demo.jpg)
+
 ## Product scope
 
 - **Included:** drive discovery, volume information, disk-space reporting, directory scanning, file-size analysis, category classification, large-file identification, temporary and cache identification, possible duplicate candidates, protected-path recognition, permission-error reporting, scan progress, CLI reports, JSON output, plain-text output, terminal UI.

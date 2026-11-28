@@ -21,14 +21,6 @@ const DIM = "#303030";
 const FAINT = "#5a5a5a";
 const MUTED = "#8c8c8c";
 
-const VERDICT_COLOR: Record<string, Rgb> = {
-  junk: [74, 222, 128],
-  unused: [251, 191, 36],
-  review: [34, 211, 238],
-  system: [100, 116, 139],
-  yours: [180, 180, 180],
-};
-
 function hash(a: number, b: number): number {
   let h = Math.imul(a + 374761393, 668265263) ^ Math.imul(b + 1274126177, 2246822519);
   h = Math.imul(h ^ (h >>> 13), 3266489917);
@@ -45,32 +37,8 @@ function statusText(store: Store): { text: string; color: string } {
   return { text: "scan complete", color: FAINT };
 }
 
-function HeatDots({
-  fraction,
-  color,
-  count,
-  dim = false,
-}: {
-  fraction: number;
-  color: Rgb;
-  count: number;
-  dim?: boolean;
-}) {
-  if (count <= 0) return null;
-  const lit = fraction > 0 ? Math.max(1, Math.round(Math.min(1, fraction) * count)) : 0;
-  return (
-    <Box flexShrink={0}>
-      {Array.from({ length: count }, (_, index) => (
-        <Text key={index} color={index < lit ? (dim ? "#7a7a7a" : rgb(color)) : DIM}>
-          {index < lit ? "●" : "·"}
-        </Text>
-      ))}
-    </Box>
-  );
-}
-
-/** Character heatmap, the closest Ink equivalent to the original dot-matrix meter. */
-function Heatmap({ store, width, rows }: { store: Store; width: number; rows: number }) {
+/** One-line character heatmap: the single top storage bar. */
+function Heatmap({ store, width }: { store: Store; width: number }) {
   const segments = diskSegments(store.get().scan);
   const cells: Array<{ color: string; kind: "segment" | "unmeasured" | "free" }> = [];
 
@@ -88,26 +56,20 @@ function Heatmap({ store, width, rows }: { store: Store; width: number; rows: nu
   while (cells.length < width) cells.push({ color: DIM, kind: "free" });
 
   return (
-    <Box flexDirection="column">
-      {Array.from({ length: rows }, (_, row) => (
-        <Box key={row}>
-          {cells.slice(0, width).map((cell, column) => {
-            if (cell.kind === "free") return <Text key={column} color={DIM}> </Text>;
-            if (cell.kind === "unmeasured") return <Text key={column} color={cell.color}>░</Text>;
-            const noise = hash(column + 1, row + 7);
-            const char = rows === 1 ? "█" : noise > 0.8 ? "█" : noise > 0.42 ? "▓" : "▒";
-            return <Text key={column} color={cell.color}>{char}</Text>;
-          })}
-        </Box>
-      ))}
+    <Box>
+      {cells.slice(0, width).map((cell, column) => {
+        if (cell.kind === "free") return <Text key={column} color={DIM}> </Text>;
+        if (cell.kind === "unmeasured") return <Text key={column} color={cell.color}>░</Text>;
+        const noise = hash(column + 1, 7);
+        const char = noise > 0.8 ? "█" : noise > 0.42 ? "▓" : "▒";
+        return <Text key={column} color={cell.color}>{char}</Text>;
+      })}
     </Box>
   );
 }
 
-function CategoryList({ store, width, showDots }: { store: Store; width: number; showDots: boolean }) {
+function CategoryList({ store, width }: { store: Store; width: number }) {
   const state = store.get();
-  const largest = Math.max(1, ...CATEGORIES.map((category) => state.scan.sizes[category.id]));
-  const dotCount = Math.max(0, Math.min(8, width - 23));
 
   return (
     <Box flexDirection="column" width={width} marginRight={2} flexShrink={0}>
@@ -127,14 +89,6 @@ function CategoryList({ store, width, showDots }: { store: Store; width: number;
               {` ${name}`}
             </Text>
             <Text color={selected ? "white" : MUTED}>{gb(state.scan.sizes[category.id]).padStart(8)}</Text>
-            {showDots ? (
-              <HeatDots
-                fraction={state.scan.sizes[category.id] / largest}
-                color={category.color}
-                count={dotCount}
-                dim={state.hover !== null && state.hover !== category.id && !selected}
-              />
-            ) : null}
           </Box>
         );
       })}
@@ -165,22 +119,18 @@ function ItemRow({
   store,
   item,
   index,
-  showDots,
   showPath,
   showDetails,
   showMeta,
   showAge,
-  maxSize,
 }: {
   store: Store;
   item: Item;
   index: number;
-  showDots: boolean;
   showPath: boolean;
   showDetails: boolean;
   showMeta: boolean;
   showAge: boolean;
-  maxSize: number;
 }) {
   const state = store.get();
   const selected = state.row === index;
@@ -190,7 +140,6 @@ function ItemRow({
   const category = CATEGORY[state.selected];
   const color = label.verdict === "review" ? "cyan" : label.verdict === "unused" ? "yellow" : label.verdict === "system" ? "blue" : label.verdict === "junk" ? "green" : "gray";
   const name = basename(item.path) || item.path;
-  const heat = VERDICT_COLOR[label.verdict] ?? category.color;
 
   return (
     <Box flexDirection="column" flexShrink={0}>
@@ -205,7 +154,6 @@ function ItemRow({
           </Text>
         </Box>
         <Text color={selected ? "white" : MUTED}>{size(item.size).padStart(8)}</Text>
-        {showDots ? <HeatDots fraction={item.size / Math.max(1, maxSize)} color={heat} count={6} dim={!selected && label.verdict === "yours"} /> : null}
         {showMeta ? <Text color={color}>{label.verdict === "yours" ? "" : label.verdict.padEnd(7)}</Text> : null}
         {showAge && usage ? <Text color={FAINT}>{shortAge(Date.now() - usage.at).padStart(6)}</Text> : null}
       </Box>
@@ -305,34 +253,36 @@ function TerminalApp({ store, onQuit }: { store: Store; onQuit: () => void }) {
 
   const columns = Math.max(20, dims.columns);
   const rows = Math.max(8, dims.rows);
+  // Leave breathing room at the bottom. A frame that exactly fills the
+  // terminal scrolls, leaving the previous frame behind as a duplicate.
+  const contentRows = Math.max(4, rows - 2);
   const narrow = columns < 78;
   const tiny = rows < 12;
   const compact = rows < 24 || narrow;
 
   const entries = store.entries();
   const selected = entries[state.row];
-  const showSidebar = !narrow;
+  // The full category sidebar is 14 lines. Below 22 rows it would force the
+  // whole frame past the terminal height, so use the compact strip instead.
+  const showSidebar = !narrow && rows >= 22;
   const sideWidth = showSidebar ? Math.min(31, Math.max(26, Math.floor(columns * 0.3))) : 0;
   const contentWidth = Math.max(18, columns - 2 - (showSidebar ? sideWidth + 2 : 0));
   const showMeter = rows >= 14;
   const showReadOnly = rows >= 11 && !tiny;
-  const heatRows = rows >= 32 ? 3 : rows >= 20 ? 2 : 1;
   const showRecommendation = !!state.recommendation && rows >= 18;
   const recommendationCompact = rows < 28 || narrow;
   const showDetails = !!selected && rows >= 17 && !showRecommendation;
   const detailsRows = showDetails ? 2 : 0;
   const headerRows = tiny ? 2 : 3 + (showReadOnly ? 1 : 0) + (columns < 50 ? 1 : 0);
-  const sectionRows = tiny ? 2 : narrow ? 3 : compact ? 2 : 3;
+  const sectionRows = tiny ? 2 : !showSidebar ? 3 : compact ? 2 : 3;
   const recommendationRows = showRecommendation ? (recommendationCompact ? 1 : 5) : 0;
   const footerRows = 1 + (state.note ? 1 : 0) + (state.action ? 1 : 0);
-  const visibleCount = Math.max(2, rows - headerRows - (showMeter ? heatRows : 0) - sectionRows - recommendationRows - detailsRows - footerRows);
+  const visibleCount = Math.max(1, contentRows - headerRows - (showMeter ? 1 : 0) - sectionRows - recommendationRows - detailsRows - footerRows);
   const start = Math.max(0, Math.min(Math.max(0, entries.length - visibleCount), state.row - Math.floor(visibleCount / 2)));
   const visible = entries.slice(start, start + visibleCount);
-  const maxSize = entries[0]?.size ?? 1;
   const status = statusText(store);
   const drive = state.drives[state.drive];
   const reclaimable = store.reclaimable();
-  const showHeatDots = contentWidth >= 48;
   const showMeta = contentWidth >= 44;
   const showAge = contentWidth >= 58;
   const narrowFooter = columns < 70;
@@ -409,14 +359,14 @@ function TerminalApp({ store, onQuit }: { store: Store; onQuit: () => void }) {
             : "no accessible drive"}
         </Text>
       ) : null}
-      {showMeter ? <Heatmap store={store} width={Math.max(10, columns - 2)} rows={heatRows} /> : null}
+      {showMeter ? <Heatmap store={store} width={Math.max(10, columns - 2)} /> : null}
       {showSidebar ? (
         <Box flexGrow={1} flexShrink={1}>
-          <CategoryList store={store} width={sideWidth} showDots={sideWidth >= 25} />
+          <CategoryList store={store} width={sideWidth} />
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
             <SectionHeader store={store} compact={compact} visibleCount={visibleCount} start={start} total={entries.length} />
             {visible.map((item, offset) => (
-              <ItemRow key={item.path} store={store} item={item} index={start + offset} showDots={showHeatDots} showPath={!narrow} showDetails={showDetails} showMeta={showMeta} showAge={showAge} maxSize={maxSize} />
+              <ItemRow key={item.path} store={store} item={item} index={start + offset} showPath={!narrow} showDetails={showDetails} showMeta={showMeta} showAge={showAge} />
             ))}
             {entries.length === 0 ? (
               <Text color={FAINT}>{state.scan.phase === "scanning" ? "still measuring…" : state.scan.phase === "completed" ? "nothing here" : "partial analysis; nothing measured here"}</Text>
@@ -428,7 +378,7 @@ function TerminalApp({ store, onQuit }: { store: Store; onQuit: () => void }) {
           {!tiny ? <CategoryStrip store={store} /> : null}
           <SectionHeader store={store} compact visibleCount={visibleCount} start={start} total={entries.length} />
           {visible.map((item, offset) => (
-            <ItemRow key={item.path} store={store} item={item} index={start + offset} showDots={false} showPath={false} showDetails={showDetails} showMeta={showMeta} showAge={showAge} maxSize={maxSize} />
+            <ItemRow key={item.path} store={store} item={item} index={start + offset} showPath={false} showDetails={showDetails} showMeta={showMeta} showAge={showAge} />
           ))}
           {entries.length === 0 ? (
             <Text color={FAINT}>{state.scan.phase === "scanning" ? "still measuring…" : state.scan.phase === "completed" ? "nothing here" : "partial analysis; nothing measured here"}</Text>
