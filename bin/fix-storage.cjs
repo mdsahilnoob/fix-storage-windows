@@ -57,12 +57,17 @@ let unknown;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === "--drive") {
-    if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+    if (!args[i + 1] || !args[i + 1].trim() || args[i + 1].startsWith("--")) {
       process.stderr.write(`fix-storage: --drive needs a drive\n\n${HELP}`);
       process.exit(2);
     }
     i++;
-  } else if (!known.has(arg) && !arg.startsWith("--drive=")) {
+  } else if (arg.startsWith("--drive=")) {
+    if (!arg.slice("--drive=".length).trim()) {
+      process.stderr.write(`fix-storage: --drive needs a drive\n\n${HELP}`);
+      process.exit(2);
+    }
+  } else if (!known.has(arg)) {
     unknown = arg;
     break;
   }

@@ -7,7 +7,7 @@ import { isWhole, type Usage } from "./classify";
 import { homeTrash, type Layout } from "./layout";
 import { IS_MAC, IS_WINDOWS, OS_NAME } from "./platform";
 import { windowsUsage } from "./windows/metadata";
-import { normalPath, windowsEntryKind } from "./windows/paths";
+import { extendedPath, normalPath, windowsEntryKind } from "./windows/paths";
 import { windowsReviewRestriction } from "./windows/permissions";
 import { revealWindows } from "./windows/reveal";
 import { findWindowsCulprit } from "./windows/scan";
@@ -22,6 +22,9 @@ export interface ListHandle {
  * later reuses them instead of measuring again, so diving in is instant.
  */
 const known = new Map<string, number>();
+
+/** Use extended-length Windows paths for filesystem access, but keep display paths normal. */
+const fsPath = (value: string) => (IS_WINDOWS ? extendedPath(value) : value);
 
 /** Drops remembered sizes for a path, everything inside it, and every folder above it. */
 export function forgetSizes(path: string) {
@@ -61,7 +64,7 @@ export function listFolder(
     }
     let entries;
     try {
-      entries = await fsp.readdir(path, { withFileTypes: true });
+      entries = await fsp.readdir(fsPath(path), { withFileTypes: true });
     } catch {
       if (!cancelled) onUpdate([], true, "");
       return;
@@ -74,7 +77,7 @@ export function listFolder(
         continue;
       }
       try {
-        const stat = await fsp.lstat(child);
+        const stat = await fsp.lstat(fsPath(child));
         items.push({ path: child, size: IS_WINDOWS ? Number(stat.size) : stat.blocks * 512, dir: false });
       } catch {
         // vanished

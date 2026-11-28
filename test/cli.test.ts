@@ -48,6 +48,26 @@ test("cleanup rejection is not masked by help", () => {
   expect(result.stderr).toContain("READ-ONLY");
 });
 
+test("missing or empty --drive values are rejected instead of selecting a default drive", () => {
+  const forms = [
+    ["--drive"],
+    ["--drive", ""],
+    ["--drive", "   "],
+    ["--drive="],
+    ["--drive=   "],
+  ];
+
+  for (const args of forms) {
+    const result = run(args);
+    expect({ args, status: result.status, stderr: String(result.stderr) }).toMatchObject({
+      args,
+      status: 2,
+      stderr: expect.stringContaining("--drive needs a drive"),
+    });
+    expect(result.stdout).toBe("");
+  }
+});
+
 test("help alone still exits successfully and describes read-only mode", () => {
   const result = run(["--help"]);
   expect(result.status).toBe(0);
