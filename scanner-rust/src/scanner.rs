@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::json;
 
 use crate::errors::{io_issue, make_issue};
+use crate::process_stats;
 use crate::protocol::{
     summary_value, Entry, EventSink, ScanIssue, ScanRequest, ScanResult, ScanSummary, Volume,
 };
@@ -145,6 +146,7 @@ impl State {
             json!({
                 "summary": summary_value(&summary),
                 "error": error,
+                "runtime": process_stats::current(),
             }),
         )?;
         Ok(ScanResult {

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use fix_storage_scanner_rust::process_stats;
 use fix_storage_scanner_rust::protocol::NullSink;
 use fix_storage_scanner_rust::protocol::{
     CancelMessage, EventSink, Implementation, NormalizedReport, ReportScan, ReportTotals,
@@ -101,6 +102,7 @@ fn report(request: &ScanRequest) -> Result<NormalizedReport, String> {
         },
         entries: result.entries,
         errors: result.errors,
+        runtime: process_stats::current(),
     })
 }
 

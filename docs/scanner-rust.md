@@ -50,6 +50,21 @@ fallback. It does not use jwalk or Rayon. Directory workers are implemented with
 scoped standard-library threads and a bounded work queue. No filesystem
 mutation API is used.
 
+### Native enumeration experiment
+
+A direct 10,000-file flat-directory experiment produced:
+
+| Approach | Replicate times |
+| --- | --- |
+| `std::fs::read_dir` only | 6.92, 8.58, 4.59 ms |
+| `read_dir` + entry metadata/file type | 4.88, 3.54, 6.66 ms |
+| `FindFirstFileExW` native entries | 20.26, 11.84, 9.34 ms |
+
+The native path was slower in this direct comparison. It also allocated and
+retained structured entries while the simpler probes only counted/aggregated,
+so this is not a like-for-like API cost comparison. Native enumeration is not
+assumed to be universally faster.
+
 ## Protocol
 
 Requests are one JSON line on stdin:
@@ -159,6 +174,33 @@ The small fixtures remain dominated by process startup and cache noise. The
 10,000-file result and the 100,000-file scan-only result are the meaningful
 large-workload signals; the full report/IPC overhead still needs optimization.
 
+### End-to-end, 10,000 files / 100 directories
+
+Three repetitions, median wall times:
+
+| Output path | Median |
+| --- | ---: |
+| TypeScript complete scan | 706.98 ms |
+| TypeScript normalized JSON serialization | 0.11 ms |
+| TypeScript CLI text rendering | 0.07 ms |
+| Rust scan-only summary report | 26.67 ms |
+| Rust full normalized report | 28.49 ms |
+| Rust report serialization portion | 1.82 ms |
+| Rust through TypeScript NDJSON adapter | 49.41 ms |
+
+Single-observation resource readings from the final repetition:
+
+- Parent TypeScript RSS: 248,795,136 bytes
+- Rust peak RSS: 5,246,976 bytes
+- Rust CPU: 15.625 ms user + 78.125 ms system
+- Parent TypeScript CPU: 813 ms user + 1,515 ms system
+- Adapter terminal batch count: 1 (all 100 direct directory entries fit the
+  requested 200-entry batch)
+
+The adapter adds process/event overhead over direct report mode, but remains
+substantially faster than the complete TypeScript scan in this workload. The
+adapter output normalized equal to the TypeScript reference.
+
 ## Memory and concurrency
 
 - The production-shaped directory path uses bounded scoped-thread workers.
@@ -168,7 +210,10 @@ large-workload signals; the full report/IPC overhead still needs optimization.
 - Protocol streaming mode buffers one entry batch at a time.
 - `collectEntries: false` keeps the full entry list out of memory.
 - Report mode retains entries because the normalized report requires them.
-- No Rust peak-RSS or CPU-time measurement was captured; wall time only.
+- The end-to-end script captured one Rust peak-RSS/CPU observation and parent
+  RSS/CPU; it did not compute repeated combined peaks.
+- Worker utilization, maximum queue depth, and IPC throughput are not
+  instrumented.
 - Cancellation is cooperative at directory and entry boundaries.
 - The IPC cancellation path was exercised against a running child process.
 - A five-second watchdog terminates an unresponsive cancelled process.

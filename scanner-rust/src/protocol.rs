@@ -4,6 +4,8 @@ use std::io::{self, BufWriter, Stdout, Write};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::process_stats::ProcessStats;
+
 pub const SCHEMA_VERSION: &str = "1.0";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -137,6 +139,7 @@ pub struct NormalizedReport {
     pub totals: ReportTotals,
     pub entries: Vec<Entry>,
     pub errors: Vec<ScanIssue>,
+    pub runtime: ProcessStats,
 }
 
 #[derive(Debug, Clone, Serialize)]
