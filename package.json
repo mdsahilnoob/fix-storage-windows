@@ -46,6 +46,9 @@
     "plain": "tsc -p tsconfig.json && node bin/fix-storage.cjs --plain",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "bench:scanner": "bun bench/scanner-bench.ts",
+    "scanner:reference": "bun tools/scanner-reference.ts",
+    "scanner:diff": "node tools/scanner-differential.mjs",
     "check:readonly": "node tools/check-readonly.cjs",
     "prepack": "npm run build"
   },

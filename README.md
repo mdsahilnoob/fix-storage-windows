@@ -102,6 +102,8 @@ Windows access timestamps are not treated as last-opened dates. The interface di
 - [Cleanup security](docs/windows-security.md)
 - [Storage categories](docs/windows-storage-categories.md)
 - [Compatibility audit](docs/windows-compatibility.md)
+- [Scanner contract](docs/scanner-contract.md)
+- [Scanner benchmark baseline](docs/scanner-benchmark.md)
 - [Progress and implementation status](docs/windows-progress.md)
 - [Changelog](CHANGELOG.md)
 
